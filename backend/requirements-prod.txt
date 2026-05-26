@@ -1,0 +1,51 @@
+# AIRIS backend — production dependencies (Linux / Railway / Python 3.11)
+# Curated from application imports. No Windows-only or dev/notebook/ML-training stacks.
+#
+# Explicitly excluded (were in the old pip-freeze requirements.txt):
+#   pywin32, pypiwin32, pythonnet, clr_loader  — Windows-only
+#   ipython, jupyter_*, ipykernel, debugpy, matplotlib, seaborn, keras, tensorflow/*
+#   selenium, webdriver-manager, fabric, pytest, scikit-learn, pandas, numpy, scipy
+#   google-generativeai stack, assemblyai (optional; add if you wire the SDK)
+
+# ── Web API ───────────────────────────────────────────────────────────────────
+fastapi>=0.115.0,<0.130.0
+uvicorn[standard]>=0.24.0,<0.35.0
+starlette>=0.40.0,<0.51.0
+python-multipart>=0.0.9,<0.1.0
+email-validator>=2.0.0,<3.0.0
+
+# ── Config / validation ───────────────────────────────────────────────────────
+pydantic>=2.10.0,<3.0.0
+pydantic-settings>=2.6.0,<3.0.0
+python-dotenv>=1.0.0,<2.0.0
+
+# ── Database ──────────────────────────────────────────────────────────────────
+SQLAlchemy>=2.0.25,<2.1.0
+alembic>=1.13.0,<2.0.0
+psycopg[binary]>=3.2.0,<3.4.0
+greenlet>=3.0.0,<4.0.0
+
+# ── Auth / security ───────────────────────────────────────────────────────────
+python-jose[cryptography]>=3.3.0,<4.0.0
+passlib[bcrypt]>=1.7.4,<2.0.0
+bcrypt>=3.2.0,<4.0.0
+cryptography>=42.0.0,<47.0.0
+PyJWT>=2.8.0,<3.0.0
+
+# ── HTTP clients / resilience ───────────────────────────────────────────────────
+httpx>=0.27.0,<0.29.0
+tenacity>=8.2.0,<10.0.0
+
+# ── Resume / document parsing ───────────────────────────────────────────────────
+pdfplumber>=0.11.0,<0.12.0
+pypdf>=5.0.0,<7.0.0
+PyMuPDF>=1.24.0,<1.28.0
+python-docx>=1.1.0,<2.0.0
+
+# ── Background jobs (optional; set CELERY_DISPATCH_ENABLED=true + Redis URL) ─
+celery>=5.4.0,<6.0.0
+redis>=5.0.0,<8.0.0
+
+# ── Integrations ──────────────────────────────────────────────────────────────
+twilio>=9.0.0,<10.0.0
+livekit-api>=1.0.0,<2.0.0

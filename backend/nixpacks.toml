@@ -1,0 +1,15 @@
+# Railway Nixpacks — pin Python 3.11 for AI/doc parsing wheel compatibility.
+[variables]
+NIXPACKS_PYTHON_VERSION = "3.11"
+
+[phases.setup]
+nixPkgs = ["python311", "gcc"]
+
+[phases.install]
+cmds = ["pip install --upgrade pip", "pip install -r requirements.txt"]
+
+[phases.build]
+cmds = ["python -c \"import fastapi, uvicorn, sqlalchemy; print('deps ok')\""]
+
+[start]
+cmd = "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"

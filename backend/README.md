@@ -29,6 +29,17 @@ uvicorn app.main:app --reload
 Health endpoint:
 - `GET /api/v1/health`
 
+### Railway deployment
+
+Set the service **root directory** to `backend`, then deploy with:
+
+- **Python:** 3.11 (`runtime.txt`, `nixpacks.toml`, or `.python-version`)
+- **Install:** `pip install -r requirements.txt` (production deps via `requirements-prod.txt`)
+- **Start:** `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
+
+`Procfile`, `railway.json`, and `nixpacks.toml` in this folder encode the same defaults.
+Do **not** use the old pip-freeze `requirements.txt` from Windows — it pulled `pywin32` / `pythonnet` and ML/notebook stacks that fail on Linux.
+
 ## 3) Reflection (existing Supabase schema)
 
 At startup, `app.models.reflected.reflect_database_schema()` reflects your current DB schema into ORM classes using SQLAlchemy automap.
