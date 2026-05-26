@@ -2,7 +2,7 @@
  * CAND-006: Candidate duplicate detection & merge API client.
  */
 
-import { apiFetch } from "@/lib/api/client";
+import { apiRequest } from "@/lib/api/client";
 
 export interface DuplicateMatch {
   candidate_id: string;
@@ -38,7 +38,7 @@ export async function checkDuplicate(
   phone: string | null | undefined,
   excludeId?: string,
 ): Promise<DuplicateCheckResult> {
-  return apiFetch<DuplicateCheckResult>("/candidates/check-duplicate", {
+  return apiRequest<DuplicateCheckResult>("/candidates/check-duplicate", {
     method: "POST",
     body: JSON.stringify({
       email: email?.trim() || null,
@@ -59,7 +59,7 @@ export async function mergeCandidates(
   survivorId: string,
   duplicateId: string,
 ): Promise<MergeResponse> {
-  return apiFetch<MergeResponse>(`/candidates/${survivorId}/merge`, {
+  return apiRequest<MergeResponse>(`/candidates/${survivorId}/merge`, {
     method: "POST",
     body: JSON.stringify({ duplicate_id: duplicateId }),
   });

@@ -1,5 +1,8 @@
 import React from 'react';
 import Link from 'next/link';
+
+/** Public marketing homepage — always statically generated for reliable Vercel routing. */
+export const dynamic = 'force-static';
 import { 
   ChevronDown, 
   CheckCircle2, 

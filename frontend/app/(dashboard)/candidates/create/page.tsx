@@ -275,8 +275,8 @@ export default function CandidatesPage() {
     }
   }
 
-  async function _doSaveReviewedCandidate() {
-    if (!draftCandidate) return;
+  async function _doSaveReviewedCandidate(): Promise<boolean> {
+    if (!draftCandidate) return false;
     setSavingReview(true);
     try {
       const created = await createCandidate({
@@ -303,22 +303,24 @@ export default function CandidatesPage() {
       setParseResult(null);
       setResumeFile(null);
       setError(null);
+      return true;
     } catch (err) {
       if (err instanceof ApiError && err.status === 409) {
         setError("This candidate already exists in the system (Duplicate email or phone).");
       } else {
         setError(err instanceof Error ? err.message : "Unable to save parsed candidate.");
       }
+      return false;
     } finally {
       setSavingReview(false);
     }
   }
 
-  async function handleSaveReviewedCandidate() {
-    if (!draftCandidate) return;
+  async function handleSaveReviewedCandidate(): Promise<boolean> {
+    if (!draftCandidate) return false;
     if (!draftCandidate.first_name.trim() || !draftCandidate.last_name.trim()) {
       setError("First name and last name are required in parsed resume verification.");
-      return;
+      return false;
     }
     // CAND-006: Pre-check for duplicates
     const emailVal = draftCandidate.email.trim();
@@ -327,15 +329,17 @@ export default function CandidatesPage() {
       try {
         const dupResult = await checkDuplicate(emailVal || null, phoneVal || null);
         if (dupResult.has_duplicates) {
-          setPendingCreate(() => _doSaveReviewedCandidate);
+          setPendingCreate(() => async () => {
+            await _doSaveReviewedCandidate();
+          });
           setDuplicateMatches(dupResult.matches);
-          return;
+          return false;
         }
       } catch {
         // Non-blocking: if dedup check fails, fall through to creation
       }
     }
-    await _doSaveReviewedCandidate();
+    return _doSaveReviewedCandidate();
   }
 
   async function handleCreateBulkUpload() {

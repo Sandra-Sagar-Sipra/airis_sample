@@ -12,7 +12,8 @@ const nextConfig: NextConfig = {
   reactStrictMode: true,
   // livekit-client ships as ESM — Next.js must transpile it for Webpack.
   transpilePackages: ["livekit-client"],
-  // Stops Next from walking up the tree and picking an unrelated lockfile as the workspace root (can affect tracing).
+  // Keeps file tracing anchored to this app (Vercel root directory = frontend). Prevents Next from
+  // walking up to the repo root and mis-detecting the workspace when backend/ exists alongside.
   outputFileTracingRoot: appRoot,
   experimental: {
     // Avoids dev-only "SegmentViewNode" / React Client Manifest errors from the App Router segment explorer (Next 15.5+).
