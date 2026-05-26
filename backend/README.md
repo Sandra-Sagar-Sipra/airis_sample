@@ -31,14 +31,21 @@ Health endpoint:
 
 ### Railway deployment
 
-Set the service **root directory** to `backend`, then deploy with:
+Set the service **root directory** to `backend`.
 
-- **Python:** 3.11 (`runtime.txt`, `nixpacks.toml`, or `.python-version`)
-- **Install:** `pip install -r requirements.txt` (production deps via `requirements-prod.txt`)
-- **Start:** `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
+| Setting | Value |
+|---------|--------|
+| Builder | **Nixpacks** (default — do not use a custom Dockerfile) |
+| Build command | *(leave empty — Nixpacks installs from `requirements.txt`)* |
+| Start command | `uvicorn app.main:app --host 0.0.0.0 --port $PORT` |
+| Health check | `/api/v1/health` |
 
-`Procfile`, `railway.json`, and `nixpacks.toml` in this folder encode the same defaults.
-Do **not** use the old pip-freeze `requirements.txt` from Windows — it pulled `pywin32` / `pythonnet` and ML/notebook stacks that fail on Linux.
+Railway auto-detects Python from `requirements.txt` and `runtime.txt` (`python-3.11.9`).
+`Procfile` and `railway.json` only set the start command and health check — no manual `pip install` in build config.
+
+**Secrets:** set `DATABASE_URL`, `JWT_SECRET_KEY`, etc. only in the Railway service **Variables** tab (never in Dockerfile, `ARG`, or build-time `ENV`).
+
+Do **not** use the old Windows pip-freeze `requirements.txt` — use the current file that includes `requirements-prod.txt`.
 
 ## 3) Reflection (existing Supabase schema)
 
