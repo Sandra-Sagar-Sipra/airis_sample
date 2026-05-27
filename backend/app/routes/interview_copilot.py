@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-import json
-import time
-from pathlib import Path
 from typing import Annotated
 from uuid import UUID
 
@@ -22,26 +19,22 @@ from app.schemas.interview_copilot import (
     TranscriptSegmentCreate,
     TranscriptSegmentResponse,
 )
+from app.core.paths import append_debug_log
 from app.services.copilot_service import CopilotService
-
-_DEBUG_LOG_PATH = Path(__file__).resolve().parents[2] / "debug-f65d2f.log"
 
 
 def _debug_log(hypothesis_id: str, location: str, message: str, data: dict) -> None:
-    payload = {
-        "sessionId": "f65d2f",
-        "runId": "post-fix",
-        "hypothesisId": hypothesis_id,
-        "location": location,
-        "message": message,
-        "data": data,
-        "timestamp": int(time.time() * 1000),
-    }
-    try:
-        with _DEBUG_LOG_PATH.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(payload, ensure_ascii=True) + "\n")
-    except Exception:
-        pass
+    append_debug_log(
+        "debug-f65d2f.log",
+        {
+            "sessionId": "f65d2f",
+            "runId": "post-fix",
+            "hypothesisId": hypothesis_id,
+            "location": location,
+            "message": message,
+            "data": data,
+        },
+    )
 
 router = APIRouter(
     prefix="/interviews/{interview_id}/copilot",

@@ -6,10 +6,11 @@ import logging
 from pydantic import AliasChoices, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from dotenv import load_dotenv
+from app.core.paths import BACKEND_ROOT
 from app.utils.redaction import redact_database_url
 
 
-BASE_DIR = Path(__file__).resolve().parents[2]
+BASE_DIR = BACKEND_ROOT
 ENV_FILE = BASE_DIR / ".env"
 load_dotenv(dotenv_path=ENV_FILE)
 

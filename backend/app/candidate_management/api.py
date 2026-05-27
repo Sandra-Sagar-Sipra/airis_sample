@@ -77,47 +77,40 @@ from app.schemas.interview import InterviewCreate, InterviewResponse, InterviewS
 from app.services.interview_service import InterviewService
 from app.models.pipeline import Pipeline
 from app.models.interview import Interview
+from app.core.paths import append_debug_log
 from app.services.candidate_service import CandidateService as LegacyCandidateService
 
 router = APIRouter(tags=["candidate-management"])
 logger = logging.getLogger(__name__)
-_DEBUG_LOG_PATH = Path(__file__).resolve().parents[2] / "debug-f65d2f.log"
-_DEBUG_LOG_PATH_7B7C67 = Path(__file__).resolve().parents[4] / "debug-7b7c67.log"
 _SIGNED_DOWNLOAD_TTL_SECONDS = 3600
 
 
 def _debug_log(hypothesis_id: str, location: str, message: str, data: dict) -> None:
-    payload = {
-        "sessionId": "f65d2f",
-        "runId": "pre-fix",
-        "hypothesisId": hypothesis_id,
-        "location": location,
-        "message": message,
-        "data": data,
-        "timestamp": int(time.time() * 1000),
-    }
-    try:
-        with _DEBUG_LOG_PATH.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(payload, ensure_ascii=True) + "\n")
-    except Exception:
-        pass
+    append_debug_log(
+        "debug-f65d2f.log",
+        {
+            "sessionId": "f65d2f",
+            "runId": "pre-fix",
+            "hypothesisId": hypothesis_id,
+            "location": location,
+            "message": message,
+            "data": data,
+        },
+    )
 
 
 def _debug_log_7b7c67(hypothesis_id: str, location: str, message: str, data: dict) -> None:
-    payload = {
-        "sessionId": "7b7c67",
-        "runId": "pre-fix",
-        "hypothesisId": hypothesis_id,
-        "location": location,
-        "message": message,
-        "data": data,
-        "timestamp": int(time.time() * 1000),
-    }
-    try:
-        with _DEBUG_LOG_PATH_7B7C67.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(payload, ensure_ascii=True, default=str) + "\n")
-    except Exception:
-        pass
+    append_debug_log(
+        "debug-7b7c67.log",
+        {
+            "sessionId": "7b7c67",
+            "runId": "pre-fix",
+            "hypothesisId": hypothesis_id,
+            "location": location,
+            "message": message,
+            "data": data,
+        },
+    )
 
 
 class _NoopTaskEnqueuer(TaskEnqueuerPort):

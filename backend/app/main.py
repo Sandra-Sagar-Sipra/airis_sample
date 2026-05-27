@@ -65,6 +65,13 @@ app = FastAPI(
 # The callable is invoked lazily on the first request to /openapi.json.
 app.openapi = build_custom_openapi(app, settings)  # type: ignore[method-assign]
 
+
+@app.get("/", tags=["health"])
+def root() -> dict[str, str]:
+    """Lightweight liveness probe for platform healthchecks that hit `/`."""
+    return {"status": "ok", "service": settings.app_name}
+
+
 # Step 2: ADD CORS (TOP LEVEL)
 app.add_middleware(
     CORSMiddleware,
