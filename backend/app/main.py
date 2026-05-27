@@ -81,10 +81,22 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-CORS_HEADERS = {
-    "Access-Control-Allow-Origin": get_cors_origins(settings.cors_origins)[0],
-    "Access-Control-Allow-Credentials": "true",
-}
+_ALLOWED_ORIGINS = set(get_cors_origins(settings.cors_origins))
+
+
+def _cors_headers_for_request(request: Request) -> dict[str, str]:
+    """
+    When returning JSON error responses, ensure CORS headers match the incoming
+    `Origin` (or return nothing). This avoids browsers rejecting responses due
+    to `Access-Control-Allow-Origin` not matching the request origin.
+    """
+    origin = request.headers.get("origin")
+    if origin and origin in _ALLOWED_ORIGINS:
+        return {
+            "Access-Control-Allow-Origin": origin,
+            "Access-Control-Allow-Credentials": "true",
+        }
+    return {}
 
 from fastapi.exceptions import RequestValidationError, ResponseValidationError
 
@@ -115,7 +127,7 @@ async def starlette_http_exception_handler(request: Request, exc: StarletteHTTPE
             "detail_preview": str(exc.detail)[:300] if exc.detail is not None else "",
         },
     )
-    headers = dict(CORS_HEADERS)
+    headers = _cors_headers_for_request(request)
     exc_headers = getattr(exc, "headers", None)
     if exc_headers is not None:
         headers = {**headers, **exc_headers}
@@ -130,7 +142,7 @@ async def starlette_http_exception_handler(request: Request, exc: StarletteHTTPE
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
     return JSONResponse(
         status_code=422,
-        headers=CORS_HEADERS,
+        headers=_cors_headers_for_request(request),
         content={
             "success": False,
             "error": "Validation Error",
@@ -156,7 +168,7 @@ async def response_validation_exception_handler(request: Request, exc: ResponseV
     )
     return JSONResponse(
         status_code=500,
-        headers=CORS_HEADERS,
+        headers=_cors_headers_for_request(request),
         content={
             "success": False,
             "detail": "Response serialization error.",
@@ -186,7 +198,7 @@ async def global_exception_handler(request: Request, exc: Exception):
         safe_message = safe_message[:2000] + "…"
     return JSONResponse(
         status_code=500,
-        headers=CORS_HEADERS,
+        headers=_cors_headers_for_request(request),
         content={
             "success": False,
             "detail": "Internal server error",
