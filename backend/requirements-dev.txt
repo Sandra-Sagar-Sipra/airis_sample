@@ -1,5 +1,5 @@
-# Local development and CI — includes production deps plus test tools.
--r requirements-prod.txt
+# Local development and CI
+-r requirements.txt
 
 pytest>=8.0.0,<10.0.0
 httpx>=0.27.0,<0.29.0

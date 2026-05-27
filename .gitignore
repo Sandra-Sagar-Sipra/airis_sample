@@ -35,9 +35,11 @@ dist/
 build/
 *.egg-info/
 .venv/
+.venv*/
 venv/
 env/
 ENV/
+backend/.venv-railway-test/
 
 # ----------------------------
 # Node / Next.js

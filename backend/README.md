@@ -40,8 +40,11 @@ Set the service **root directory** to `backend`.
 | Start command | `uvicorn app.main:app --host 0.0.0.0 --port $PORT` |
 | Health check | `/api/v1/health` |
 
-Railway auto-detects Python from `requirements.txt` and `runtime.txt` (`python-3.11.9`).
-`Procfile` and `railway.json` only set the start command and health check — no manual `pip install` in build config.
+Railway auto-detects Python from **`backend/requirements.txt`** (single inlined file — no `-r` chain) and **`runtime.txt`** (`python-3.11.9`).
+
+**Important:** Do not commit virtualenvs (`.venv*`). An old Windows `pip freeze` in git history contained `pywin32==311` / `pypiwin32==223`; the current `requirements.txt` does not. After pulling, redeploy with **clear build cache**.
+
+Validate locally: `python scripts/check-requirements-linux.py` then `pip install -r requirements.txt`.
 
 **Secrets:** set `DATABASE_URL`, `JWT_SECRET_KEY`, etc. only in the Railway service **Variables** tab (never in Dockerfile, `ARG`, or build-time `ENV`).
 
