@@ -16,5 +16,5 @@ MVP frontend scaffold connected to the existing FastAPI backend.
 ## Required backend
 
 - Backend should be running and accessible at `NEXT_PUBLIC_API_BASE_URL`
-- Default expected base URL: `http://localhost:8000/api/v1`
+- Default expected base URL (origin only): `http://localhost:8000`
 - Login uses `POST /auth/login` and stores access token in browser local storage.

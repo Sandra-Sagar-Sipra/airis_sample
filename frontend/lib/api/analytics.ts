@@ -4,7 +4,7 @@
  * GET  /api/v1/pipeline-analytics         → PipelineAnalytics
  * GET  /api/v1/pipeline-analytics/export  → CSV download (window.location redirect)
  */
-import { apiRequest } from "@/lib/api/client";
+import { apiRequest, getApiBaseUrl } from "@/lib/api/client";
 import type { PipelineAnalytics, PipelineAnalyticsParams } from "@/lib/api/types";
 
 function buildAnalyticsParams(params: PipelineAnalyticsParams): URLSearchParams {
@@ -41,9 +41,7 @@ export async function downloadAnalyticsCsv(
 
   // apiRequest returns the parsed body, but for CSV we need raw text.
   // Fetch directly here so we can call .text() instead of .json().
-  const base =
-    process.env.NEXT_PUBLIC_API_BASE_URL ??
-    (typeof window !== "undefined" ? "/api/v1" : "http://127.0.0.1:8000/api/v1");
+  const base = getApiBaseUrl();
   const token =
     typeof window !== "undefined"
       ? window.localStorage.getItem("airis_access_token")

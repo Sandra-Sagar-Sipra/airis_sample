@@ -1,15 +1,34 @@
-/** Resolve API base URL (browser uses same-origin proxy in dev when env is a relative path). */
+/** Resolve API base URL into an absolute base ending with `/api/v1`.
+ *
+ * Strategy:
+ * - `NEXT_PUBLIC_API_BASE_URL` may be either:
+ *   1) backend origin only: `https://example.com`
+ *   2) already including `/api/v1`: `https://example.com/api/v1`
+ *   3) a relative dev proxy path: `/api/v1`
+ *
+ * This function normalizes all cases into exactly `${origin}/api/v1` (or `/api/v1` in-browser).
+ */
 export function getApiBaseUrl(): string {
+  const API_V1_PATH = "/api/v1";
   const configured = process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "");
   const proxyOrigin = (process.env.API_PROXY_TARGET ?? "http://127.0.0.1:8000").replace(/\/$/, "");
+  const debug = process.env.NEXT_PUBLIC_API_DEBUG === "true";
+
   if (configured) {
-    if (configured.startsWith("/") && typeof window === "undefined") {
+    // Relative proxy path: `/api/v1` for dev.
+    if (configured.startsWith("/")) {
+      if (typeof window !== "undefined") return configured;
       return `${proxyOrigin}${configured}`;
     }
-    return configured;
+
+    // Absolute origin or origin+`/api/v1`.
+    const origin = configured.replace(new RegExp(`${API_V1_PATH}/?$`), "");
+    return `${origin}${API_V1_PATH}`;
   }
-  if (typeof window !== "undefined") return "/api/v1";
-  return `${proxyOrigin}/api/v1`;
+
+  // No explicit config: use Next.js dev proxy path in browser.
+  if (typeof window !== "undefined") return API_V1_PATH;
+  return `${proxyOrigin}${API_V1_PATH}`;
 }
 
 export const API_BASE_URL = getApiBaseUrl();
@@ -244,7 +263,9 @@ async function _fetchRaw<T>(path: string, options: RequestOptions): Promise<T> {
 
   let response: Response;
   try {
-    response = await fetch(`${getApiBaseUrl()}${path}`, {
+    const base = getApiBaseUrl();
+    const url = `${base}${path}`;
+    response = await fetch(url, {
       ...rest,
       signal,
       headers: {
@@ -253,6 +274,11 @@ async function _fetchRaw<T>(path: string, options: RequestOptions): Promise<T> {
         ...headers,
       },
     });
+
+    if (process.env.NEXT_PUBLIC_API_DEBUG === "true") {
+      const contentType = response.headers.get("content-type") ?? "";
+      console.debug(`[API DEBUG] ${url} -> ${response.status} content-type=${contentType}`);
+    }
   } catch (error: unknown) {
     const aborted =
       error instanceof Error && error.name === "AbortError";
@@ -264,10 +290,11 @@ async function _fetchRaw<T>(path: string, options: RequestOptions): Promise<T> {
       throw new ApiError(message, 0, error);
     }
     const base = getApiBaseUrl();
+    const url = `${base}${path}`;
     const message =
-      `Cannot reach the API at ${base}${path}. ` +
-      "Start the backend (uvicorn on port 8000) and restart `npm run dev` if you changed .env.";
-    console.error(`[API Network Error] ${base}${path}:`, error);
+      `Cannot reach the API at ${url}. ` +
+      "Check that NEXT_PUBLIC_API_BASE_URL is set correctly and that the backend routes are exposed under `/api/v1`.";
+    console.error(`[API Network Error] ${url}:`, error);
     throw new ApiError(message, 0, error);
   } finally {
     if (timeoutId !== undefined) {
