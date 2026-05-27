@@ -105,7 +105,7 @@ export default function CandidatesPage() {
 
   // CAND-006: Duplicate detection state
   const [duplicateMatches, setDuplicateMatches] = useState<DuplicateMatch[] | null>(null);
-  const [pendingCreate, setPendingCreate] = useState<(() => Promise<void>) | null>(null);
+  const [pendingCreate, setPendingCreate] = useState<(() => Promise<boolean>) | null>(null);
 
   function trackModuleEvent(eventName: string, payload?: Record<string, unknown>) {
     // Lightweight client telemetry hook; can be wired to analytics backend later.
@@ -203,12 +203,14 @@ export default function CandidatesPage() {
       setYearsExperience("");
       setSummary("");
       setError(null);
+      return true;
     } catch (err) {
       if (err instanceof ApiError && err.status === 409) {
         setError("This candidate already exists in the system (Duplicate email or phone).");
       } else {
         setError(err instanceof Error ? err.message : "Unable to create candidate.");
       }
+      return false;
     } finally {
       setCreating(false);
     }
@@ -275,7 +277,7 @@ export default function CandidatesPage() {
     }
   }
 
-  async function _doSaveReviewedCandidate(): Promise<boolean> {
+  async function _doSaveReviewedCandidate() {
     if (!draftCandidate) return false;
     setSavingReview(true);
     try {
@@ -316,7 +318,7 @@ export default function CandidatesPage() {
     }
   }
 
-  async function handleSaveReviewedCandidate(): Promise<boolean> {
+  async function handleSaveReviewedCandidate() {
     if (!draftCandidate) return false;
     if (!draftCandidate.first_name.trim() || !draftCandidate.last_name.trim()) {
       setError("First name and last name are required in parsed resume verification.");
@@ -329,9 +331,7 @@ export default function CandidatesPage() {
       try {
         const dupResult = await checkDuplicate(emailVal || null, phoneVal || null);
         if (dupResult.has_duplicates) {
-          setPendingCreate(() => async () => {
-            await _doSaveReviewedCandidate();
-          });
+          setPendingCreate(() => _doSaveReviewedCandidate);
           setDuplicateMatches(dupResult.matches);
           return false;
         }
@@ -339,7 +339,7 @@ export default function CandidatesPage() {
         // Non-blocking: if dedup check fails, fall through to creation
       }
     }
-    return _doSaveReviewedCandidate();
+    return await _doSaveReviewedCandidate();
   }
 
   async function handleCreateBulkUpload() {
@@ -614,7 +614,10 @@ export default function CandidatesPage() {
             const action = pendingCreate;
             setDuplicateMatches(null);
             setPendingCreate(null);
-            if (action) await action();
+            if (action) {
+              const success = await action();
+              if (success) setActiveStep(4);
+            }
           }}
         />
       )}

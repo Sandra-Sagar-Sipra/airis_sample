@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel
 
 from app.core.config import get_settings
+from app.services.llm_json_completion import LlmJsonCompletionError, complete_json_async
 from app.core.dependencies import get_current_user, require_any_permissions, require_permission
 from app.core.permissions import (
     ATS_READ,
@@ -540,9 +541,8 @@ def search_jobs(
 # AI-powered JD parser  (placed above /{job_id} to avoid shadowing)
 # ------------------------------------------------------------------
 
-async def _call_groq(text: str, api_key: str) -> dict:
-    """Call Groq's OpenAI-compatible REST API and return the parsed JSON dict."""
-    prompt = f"""Extract job details from this job description.
+def _jd_parse_prompt(text: str) -> str:
+    return f"""Extract job details from this job description.
 Return ONLY valid JSON with these exact fields:
 {{
   "title": string,
@@ -564,28 +564,11 @@ No explanation. Only JSON.
 JD TEXT:
 {text}"""
 
-    async with httpx.AsyncClient() as client:
-        response = await client.post(
-            "https://api.groq.com/openai/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "model": "llama-3.3-70b-versatile",
-                "messages": [{"role": "user", "content": prompt}],
-                "temperature": 0.1,
-                "max_tokens": 1000,
-            },
-            timeout=30.0,
-        )
-        response.raise_for_status()
 
-    result = response.json()
-    content = result["choices"][0]["message"]["content"]
-    # Strip markdown fences if the model wraps its output
-    clean = content.replace("```json", "").replace("```", "").strip()
-    return json.loads(clean)
+async def _call_llm_parse_jd(text: str) -> dict:
+    """Groq-first JSON parse with configured backup providers."""
+    parsed, _version = await complete_json_async(_jd_parse_prompt(text), timeout_seconds=30.0)
+    return parsed
 
 
 @router.post("/parse-jd", response_model=JobParseResponse)
@@ -599,11 +582,12 @@ async def parse_job_description(
     from docx import Document
 
     settings = get_settings()
-    api_key = settings.groq_api_key
-    if not api_key:
+    from app.services.llm_json_completion import _resolve_groq_backup_key
+
+    if not settings.groq_api_key and not _resolve_groq_backup_key(settings) and not settings.grok_api_key:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="GROQ_API_KEY is not configured on the server.",
+            detail="No LLM API key configured for JD parsing (GROQ_API_KEY, GROQ_API_KEY_BACKUP, or GROK_API_KEY).",
         )
 
     # ── Extract text ────────────────────────────────────────────────────────
@@ -642,23 +626,28 @@ async def parse_job_description(
             detail="Provide either a JD file or raw_text.",
         )
 
-    # ── Call Groq ────────────────────────────────────────────────────────────
+    # ── Call LLM (Groq primary, backup providers on retryable failure) ───────
     try:
-        parsed = await _call_groq(text, api_key)
+        parsed = await _call_llm_parse_jd(text)
     except json.JSONDecodeError as exc:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="Groq returned malformed JSON — try again.",
+            detail="AI parse returned malformed JSON — try again.",
+        ) from exc
+    except LlmJsonCompletionError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"AI parse failed: {exc}",
         ) from exc
     except httpx.HTTPStatusError as exc:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Groq API error: {exc.response.status_code}",
+            detail=f"AI API error: {exc.response.status_code}",
         ) from exc
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Groq request failed: {exc}",
+            detail=f"AI parse request failed: {exc}",
         ) from exc
 
     # ── Return normalized payload with schema-safe defaults ───────────────────

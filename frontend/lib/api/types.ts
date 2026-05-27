@@ -556,6 +556,38 @@ export type FeedbackRecommendation =
   | "no"
   | "strong_no";
 
+export type AISummaryRecommendation =
+  | "strongly_recommend"
+  | "recommend"
+  | "neutral"
+  | "do_not_recommend";
+
+export type AISummaryPayload = {
+  key_strengths: string[];
+  concerns: string[];
+  overall_assessment: string;
+  recommendation: AISummaryRecommendation;
+  reasoning: string;
+  _fallback?: boolean;
+  error?: string;
+};
+
+export type AISummaryResponse = {
+  interview_id: string;
+  ai_summary: AISummaryPayload | { error: string } | null;
+  ai_summary_generated_at: string | null;
+  ai_summary_provider: string | null;
+  ai_summary_edited: boolean;
+};
+
+export type AISummaryUpdatePayload = {
+  key_strengths?: string[];
+  concerns?: string[];
+  overall_assessment?: string;
+  recommendation?: AISummaryRecommendation;
+  reasoning?: string;
+};
+
 export type Interview = {
   id: string;
   organization_id: string;
@@ -575,6 +607,11 @@ export type Interview = {
   created_by: string | null;
   started_at: string | null;
   ended_at: string | null;
+  // AI-004
+  ai_summary: AISummaryPayload | { error: string } | null;
+  ai_summary_generated_at: string | null;
+  ai_summary_provider: string | null;
+  ai_summary_edited: boolean;
   created_at: string;
   updated_at: string;
 };
@@ -654,6 +691,23 @@ export type InterviewNote = {
   finalized: boolean;
   created_at: string;
   updated_at: string;
+};
+
+// ── SCHED-006: Interview reminders ────────────────────────────────────────
+
+export type ReminderStatus = "scheduled" | "processing" | "sent" | "skipped" | "failed" | "cancelled";
+
+export type InterviewReminder = {
+  id: string;
+  interview_id: string;
+  reminder_type: "24h" | "1h";
+  recipient_type: "candidate" | "interviewer";
+  recipient_email: string;
+  scheduled_for: string;
+  status: ReminderStatus;
+  sent_at: string | null;
+  failure_reason: string | null;
+  created_at: string;
 };
 
 export type CandidateWorkspaceInfo = {
@@ -850,30 +904,9 @@ export type StartScreeningPayload = {
   pipeline_id?: string | null;
 };
 
-// ── AI Interview Copilot domain ───────────────────────────────────────
+// ── Interview Transcript domain ───────────────────────────────────────────────
 
-export type CopilotSessionStatus = "active" | "completed" | "summarized";
-export type SuggestionType =
-  | "follow_up"
-  | "clarification"
-  | "skill_gap"
-  | "deep_dive"
-  | "closing";
 export type TranscriptSpeaker = "interviewer" | "candidate" | "unknown";
-
-export type CopilotSession = {
-  id: string;
-  organization_id: string;
-  interview_id: string;
-  status: CopilotSessionStatus;
-  summary: Record<string, unknown> | null;
-  skills_covered: Record<string, boolean> | null;
-  prompt_tokens_used: number;
-  completion_tokens_used: number;
-  created_at: string;
-  updated_at: string;
-  summarized_at: string | null;
-};
 
 export type TranscriptSegment = {
   id: string;
@@ -895,36 +928,8 @@ export type TranscriptSegmentPayload = {
   source?: string;
 };
 
-export type AISuggestion = {
-  id: string;
-  session_id: string;
-  interview_id: string;
-  suggestion_type: SuggestionType;
-  question_text: string;
-  rationale: string | null;
-  target_skills: string[] | null;
-  difficulty: "easy" | "medium" | "hard" | null;
-  used: boolean;
-  used_at: string | null;
-  dismissed: boolean;
-  created_at: string;
-};
-
-export type SuggestRequestPayload = {
-  context_hint?: string | null;
-  suggestion_types?: SuggestionType[] | null;
-  count?: number;
-};
-
-export type SuggestionMarkPayload = {
-  used?: boolean;
-  dismissed?: boolean;
-};
-
 export type CopilotWsEventType =
   | "transcript_added"
-  | "suggestion_ready"
-  | "summary_ready"
   | "session_updated"
   | "error"
   | "ping"
@@ -1089,3 +1094,27 @@ export type GenerateQuestionsResponse = {
   fallback_used: boolean;
   duration_ms: number;
 };
+
+// Analytics Dashboard
+export interface JobStatusCount { status: string; count: number; }
+export interface ClientJobCount { client_name: string; count: number; }
+export interface RecentJobDto { id: string; title: string; client_name: string; status: string; created_at: string; }
+export interface OpenJobsResponse { total_active: number; by_status: JobStatusCount[]; by_client: ClientJobCount[]; recent_jobs: RecentJobDto[]; }
+
+export interface StageCount { stage: string; count: number; }
+export interface SourceCount { source: string; count: number; }
+export interface PipelineOverviewResponse { total_candidates: number; by_stage: StageCount[]; by_source: SourceCount[]; }
+
+export interface RecruiterActivityMetric { recruiter_name: string; submissions: number; interviews: number; placements: number; }
+export interface RecruiterActivityResponse { total_submissions: number; total_interviews: number; total_placements: number; by_recruiter: RecruiterActivityMetric[]; }
+export interface TimeToShortlistResponse { average_days: number; fastest_days: number; slowest_days: number; }
+export interface PlacementMetric { name: string; count: number; }
+export interface PlacementTrackingResponse { total_placements: number; by_recruiter: PlacementMetric[]; by_client: PlacementMetric[]; }
+
+export interface DashboardSummaryResponse {
+  open_jobs: OpenJobsResponse;
+  pipeline: PipelineOverviewResponse;
+  recruiter_activity: RecruiterActivityResponse;
+  time_to_shortlist: TimeToShortlistResponse;
+  placement_tracking: PlacementTrackingResponse;
+}

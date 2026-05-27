@@ -15,14 +15,6 @@ class CopilotSessionStatus(StrEnum):
     SUMMARIZED = "summarized"
 
 
-class SuggestionType(StrEnum):
-    FOLLOW_UP = "follow_up"
-    CLARIFICATION = "clarification"
-    SKILL_GAP = "skill_gap"
-    DEEP_DIVE = "deep_dive"
-    CLOSING = "closing"
-
-
 class TranscriptSpeaker(StrEnum):
     INTERVIEWER = "interviewer"
     CANDIDATE = "candidate"
@@ -51,42 +43,6 @@ class TranscriptSegmentResponse(BaseModel):
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
-
-
-# ── Suggestions ───────────────────────────────────────────────────────────────
-
-class SuggestRequest(BaseModel):
-    """Optional hints the frontend can pass when requesting new suggestions."""
-    context_hint: str | None = Field(
-        default=None,
-        max_length=500,
-        description="E.g. 'candidate mentioned Redis — dig deeper'",
-    )
-    suggestion_types: list[SuggestionType] | None = None
-    count: int = Field(default=3, ge=1, le=8)
-
-
-class AISuggestionResponse(BaseModel):
-    id: UUID
-    session_id: UUID
-    interview_id: UUID
-    suggestion_type: str
-    question_text: str
-    rationale: str | None
-    target_skills: list[str] | None
-    difficulty: str | None
-    used: bool
-    used_at: datetime | None
-    dismissed: bool
-    created_at: datetime
-
-    model_config = ConfigDict(from_attributes=True)
-
-
-class SuggestionUseRequest(BaseModel):
-    """Marks a suggestion as used (or dismissed)."""
-    used: bool = True
-    dismissed: bool = False
 
 
 # ── Session ───────────────────────────────────────────────────────────────────
@@ -118,7 +74,6 @@ class SummarizeRequest(BaseModel):
 
 class WsEventType(StrEnum):
     TRANSCRIPT_ADDED = "transcript_added"
-    SUGGESTION_READY = "suggestion_ready"
     SUMMARY_READY = "summary_ready"
     SESSION_UPDATED = "session_updated"
     ERROR = "error"

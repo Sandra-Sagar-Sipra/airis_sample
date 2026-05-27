@@ -1071,6 +1071,9 @@ export async function deleteCandidate(candidateId: string) {
         },
       }
     );
+    invalidateApiCache();
+    const { clearPipelineBoardCache } = await import("@/lib/api/pipeline");
+    clearPipelineBoardCache();
     return;
   }
   await apiRequest<{ deleted: boolean; hard_deleted?: boolean; candidate_id: string }>(
@@ -1079,6 +1082,9 @@ export async function deleteCandidate(candidateId: string) {
       method: "DELETE",
     }
   );
+  invalidateApiCache();
+  const { clearPipelineBoardCache } = await import("@/lib/api/pipeline");
+  clearPipelineBoardCache();
 }
 
 /** AIR-510: Archive (soft-delete) a single candidate. */

@@ -7,7 +7,7 @@ from uuid import UUID
 
 _lk_log = logging.getLogger("airis.livekit")
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -25,7 +25,10 @@ from app.core.permissions import (
 from app.db.session import get_db
 from app.schemas.auth import CurrentUser
 from app.schemas.interview import (
+    AISummaryResponse,
+    AISummaryUpdate,
     InterviewCreate,
+    InterviewReminderResponse,
     InterviewFeedbackCreate,
     InterviewFeedbackResponse,
     InterviewParticipantCreate,
@@ -370,12 +373,18 @@ def start_interview(
 @router.post("/{interview_id}/complete", response_model=InterviewResponse)
 def complete_interview(
     interview_id: UUID,
+    background_tasks: BackgroundTasks,
     db: Annotated[Session, Depends(get_db)],
     _: Annotated[CurrentUser, Depends(require_permission(INTERVIEWS_UPDATE))],
     current_user: Annotated[CurrentUser, Depends(get_current_user)],
 ) -> InterviewResponse:
     svc = InterviewService(db)
-    interview = svc.complete_interview(interview_id, UUID(current_user.organization_id), current_user)
+    interview = svc.complete_interview(
+        interview_id,
+        UUID(current_user.organization_id),
+        current_user,
+        background_tasks=background_tasks,
+    )
     return InterviewResponse.model_validate(interview)
 
 
@@ -389,6 +398,72 @@ def mark_no_show(
     svc = InterviewService(db)
     interview = svc.mark_no_show(interview_id, UUID(current_user.organization_id), current_user)
     return InterviewResponse.model_validate(interview)
+
+
+# ── Reminders (SCHED-006) ────────────────────────────────────────────────
+
+@router.get("/{interview_id}/reminders", response_model=list[InterviewReminderResponse])
+def get_reminders(
+    interview_id: UUID,
+    db: Annotated[Session, Depends(get_db)],
+    _: Annotated[CurrentUser, Depends(require_permission(INTERVIEWS_READ))],
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+) -> list[InterviewReminderResponse]:
+    """Return all reminder rows for an interview (for admin/recruiter visibility)."""
+    svc = InterviewService(db)
+    reminders = svc.get_reminders(interview_id, UUID(current_user.organization_id), current_user)
+    return [InterviewReminderResponse.model_validate(r) for r in reminders]
+
+
+# ── AI Summary (AI-004) ───────────────────────────────────────────────────
+
+@router.get("/{interview_id}/summary", response_model=AISummaryResponse)
+def get_ai_summary(
+    interview_id: UUID,
+    db: Annotated[Session, Depends(get_db)],
+    _: Annotated[CurrentUser, Depends(require_permission(INTERVIEWS_READ))],
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+) -> AISummaryResponse:
+    """Return the current AI-generated summary for a completed interview."""
+    svc = InterviewService(db)
+    return svc.get_ai_summary(interview_id, UUID(current_user.organization_id), current_user)
+
+
+@router.post("/{interview_id}/summary/generate", response_model=dict, status_code=status.HTTP_202_ACCEPTED)
+def generate_ai_summary(
+    interview_id: UUID,
+    background_tasks: BackgroundTasks,
+    db: Annotated[Session, Depends(get_db)],
+    _: Annotated[CurrentUser, Depends(require_permission(INTERVIEWS_UPDATE))],
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+) -> dict:
+    """Manually (re-)trigger AI summary generation for a completed interview.
+    Returns 202 immediately; poll GET /summary for the result."""
+    svc = InterviewService(db)
+    return svc.regenerate_ai_summary(
+        interview_id,
+        UUID(current_user.organization_id),
+        current_user,
+        background_tasks,
+    )
+
+
+@router.patch("/{interview_id}/summary", response_model=AISummaryResponse)
+def update_ai_summary(
+    interview_id: UUID,
+    payload: AISummaryUpdate,
+    db: Annotated[Session, Depends(get_db)],
+    _: Annotated[CurrentUser, Depends(require_permission(INTERVIEWS_UPDATE))],
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+) -> AISummaryResponse:
+    """Recruiter edits to the AI-generated summary. Sets ai_summary_edited=true."""
+    svc = InterviewService(db)
+    return svc.update_ai_summary(
+        interview_id,
+        UUID(current_user.organization_id),
+        current_user,
+        payload,
+    )
 
 
 # ── LiveKit embedded meeting ──────────────────────────────────────────────

@@ -62,6 +62,31 @@ export function writePipelineBoardCache(jobId: string, data: PipelineBoardCache)
   }
 }
 
+/** Clear stale kanban data after a candidate is permanently deleted. */
+export function clearPipelineBoardCache(jobId?: string): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+  try {
+    if (jobId) {
+      window.sessionStorage.removeItem(`${PIPELINE_BOARD_CACHE_PREFIX}${jobId}`);
+      return;
+    }
+    const keys: string[] = [];
+    for (let i = 0; i < window.sessionStorage.length; i += 1) {
+      const key = window.sessionStorage.key(i);
+      if (key?.startsWith(PIPELINE_BOARD_CACHE_PREFIX)) {
+        keys.push(key);
+      }
+    }
+    for (const key of keys) {
+      window.sessionStorage.removeItem(key);
+    }
+  } catch {
+    // Ignore storage errors.
+  }
+}
+
 export type PipelineCreatePayload = {
   candidate_id: string;
   job_id: string;

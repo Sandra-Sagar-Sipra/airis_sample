@@ -4,8 +4,8 @@ from datetime import datetime, time
 from uuid import UUID
 
 import sqlalchemy as sa
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, Time, func
-from sqlalchemy.dialects.postgresql import UUID as PGUUID
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, Time, func
+from sqlalchemy.dialects.postgresql import JSONB, UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -55,6 +55,12 @@ class Interview(Base):
 
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    # AI-004: structured summary generated after interview completion
+    ai_summary: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    ai_summary_generated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    ai_summary_provider: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    ai_summary_edited: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=sa.text("false"))
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now(),

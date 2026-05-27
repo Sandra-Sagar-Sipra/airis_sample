@@ -29,9 +29,6 @@ from app.services.job_service import JobService
 from app.schemas.job import AtsCandidateRescoreResponse, CandidateMatchesResponse
 from app.schemas.placement_history import CandidatePlacementListResponse
 from app.services.placement_history_service import PlacementHistoryService
-
-logger = logging.getLogger(__name__)
-
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/candidates", tags=["candidates"])

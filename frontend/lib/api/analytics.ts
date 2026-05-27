@@ -72,3 +72,25 @@ export async function downloadAnalyticsCsv(
   document.body.removeChild(anchor);
   URL.revokeObjectURL(url);
 }
+
+export async function getOpenJobsAnalytics(): Promise<import('./types').OpenJobsResponse> {
+  return apiRequest<import('./types').OpenJobsResponse>('/analytics/open-jobs', {}, 0);
+}
+
+export async function getPipelineAnalyticsOverview(): Promise<import('./types').PipelineOverviewResponse> {
+  return apiRequest<import('./types').PipelineOverviewResponse>('/analytics/pipeline', {}, 0);
+}
+
+export async function getRecruiterActivity(): Promise<import('./types').RecruiterActivityResponse> {
+  return apiRequest<import('./types').RecruiterActivityResponse>('/analytics/recruiter-activity', {}, 0);
+}
+export async function getTimeToShortlist(): Promise<import('./types').TimeToShortlistResponse> {
+  return apiRequest<import('./types').TimeToShortlistResponse>('/analytics/time-to-shortlist', {}, 0);
+}
+export async function getPlacementTracking(): Promise<import('./types').PlacementTrackingResponse> {
+  return apiRequest<import('./types').PlacementTrackingResponse>('/analytics/placement-tracking', {}, 0);
+}
+
+export async function getDashboardSummary(): Promise<import('./types').DashboardSummaryResponse> {
+  return apiRequest<import('./types').DashboardSummaryResponse>('/analytics/dashboard-summary', {}, 0);
+}

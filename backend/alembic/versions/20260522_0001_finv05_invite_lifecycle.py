@@ -45,22 +45,14 @@ def _column_names(schema: str | None) -> set[str]:
 
 def upgrade() -> None:
     schema = _schema()
+    qualified = f"{schema}.invites" if schema else "invites"
 
     # 1. Drop old check constraint (only allowed 'pending', 'accepted')
     checks = _check_names(schema)
     if _OLD_CHECK in checks:
         op.drop_constraint(_OLD_CHECK, "invites", schema=schema, type_="check")
 
-    # 2. Add new check constraint with full lifecycle statuses
-    if _NEW_CHECK not in _check_names(schema):
-        op.create_check_constraint(
-            _NEW_CHECK,
-            "invites",
-            f"status IN {_NEW_STATUSES}",
-            schema=schema,
-        )
-
-    # 3. Add timestamp columns (idempotent)
+    # 2. Add timestamp columns (idempotent) — must exist before data migration
     cols = _column_names(schema)
     for col_name in ("sent_at", "opened_at", "accepted_at", "expired_at"):
         if col_name not in cols:
@@ -70,14 +62,23 @@ def upgrade() -> None:
                 schema=schema,
             )
 
-    # 4. Data migration: pending → sent; backfill sent_at from created_at
-    qualified = f"{schema}.invites" if schema else "invites"
+    # 3. Data migration: pending → sent; backfill sent_at from created_at
+    #    Must happen BEFORE adding the new check constraint so no rows violate it.
     op.execute(
         text(
             f"UPDATE {qualified} SET status = 'sent', sent_at = created_at"
             " WHERE status = 'pending'"
         )
     )
+
+    # 4. Add new check constraint with full lifecycle statuses (after data is clean)
+    if _NEW_CHECK not in _check_names(schema):
+        op.create_check_constraint(
+            _NEW_CHECK,
+            "invites",
+            f"status IN {_NEW_STATUSES}",
+            schema=schema,
+        )
 
 
 def downgrade() -> None:

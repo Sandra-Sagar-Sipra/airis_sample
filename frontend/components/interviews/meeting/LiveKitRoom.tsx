@@ -52,6 +52,7 @@ import {
 // unrecognisable message — they don't indicate a real application error.
 setLogLevel("silent");
 import { getLiveKitToken } from "@/lib/api/livekit";
+import { useLiveKitRoom } from "@/contexts/LiveKitContext";
 import { ApiError } from "@/lib/api/client";
 import {
   Loader2,
@@ -164,6 +165,10 @@ export function LiveKitRoom({ interviewId, onConnected, onDisconnected, onNotCon
   const roomRef = useRef<Room | null>(null);
   const connectedFiredRef = useRef(false);
 
+  // Publish the Room instance to LiveKitContext so TranscriptPanel can access
+  // the audio tracks without requiring props drilling through the whole tree.
+  const liveKitContextRoomRef = useLiveKitRoom();
+
   // ── Stable callback refs ─────────────────────────────────────────────
   // Props stored in refs so the connection effect (which must remain stable)
   // can always call the latest version without being listed as a dep.
@@ -268,6 +273,8 @@ export function LiveKitRoom({ interviewId, onConnected, onDisconnected, onNotCon
         videoCaptureDefaults: { resolution: VideoPresets.h720.resolution },
       });
       roomRef.current = room;
+      // Share with TranscriptPanel (and any other consumer) via context.
+      liveKitContextRoomRef.current = room;
 
       room
         .on(RoomEvent.TrackSubscribed,      () => { if (active) rebuildTracks(room); })
@@ -310,6 +317,7 @@ export function LiveKitRoom({ interviewId, onConnected, onDisconnected, onNotCon
       active = false;            // silences all event handlers and async continuations
       const r = roomRef.current;
       roomRef.current = null;    // clear ref before disconnect so leave() doesn't double-disconnect
+      liveKitContextRoomRef.current = null; // clear context so TranscriptPanel stops recording
       r?.disconnect();
     };
     // reconnectKey: intentionally included so "Try again" button forces a new connection

@@ -1,11 +1,14 @@
 import { apiRequest, invalidateApiCache } from "@/lib/api/client";
 import type {
+  AISummaryResponse,
+  AISummaryUpdatePayload,
   Interview,
   InterviewCreatePayload,
   InterviewFeedback,
   InterviewFeedbackPayload,
   InterviewNote,
   InterviewParticipant,
+  InterviewReminder,
   InterviewUpdatePayload,
   InterviewerProfile,
   QueueInterview,
@@ -187,6 +190,37 @@ export async function markNoShow(interviewId: string): Promise<Interview> {
   const result = await apiRequest<Interview>(`${BASE}/${interviewId}/no-show`, {
     method: "POST",
     body: JSON.stringify({}),
+  });
+  invalidateApiCache(`${BASE}/${interviewId}`);
+  return result;
+}
+
+// ── Reminders (SCHED-006) ────────────────────────────────────────────────
+
+export async function getInterviewReminders(interviewId: string): Promise<InterviewReminder[]> {
+  return apiRequest<InterviewReminder[]>(`${BASE}/${interviewId}/reminders`);
+}
+
+// ── AI Summary (AI-004) ──────────────────────────────────────────────────
+
+export async function getAISummary(interviewId: string): Promise<AISummaryResponse> {
+  return apiRequest<AISummaryResponse>(`${BASE}/${interviewId}/summary`);
+}
+
+export async function generateAISummary(interviewId: string): Promise<{ status: string; interview_id: string }> {
+  return apiRequest<{ status: string; interview_id: string }>(`${BASE}/${interviewId}/summary/generate`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+}
+
+export async function updateAISummary(
+  interviewId: string,
+  payload: AISummaryUpdatePayload,
+): Promise<AISummaryResponse> {
+  const result = await apiRequest<AISummaryResponse>(`${BASE}/${interviewId}/summary`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
   });
   invalidateApiCache(`${BASE}/${interviewId}`);
   return result;

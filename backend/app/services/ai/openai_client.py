@@ -76,6 +76,78 @@ class OpenAIClient:
     def is_configured(self) -> bool:
         return bool(self._api_key)
 
+    def transcribe_audio(
+        self,
+        audio_data: bytes,
+        filename: str = "audio.webm",
+        language: str = "en",
+    ) -> str:
+        """Transcribe audio bytes using OpenAI Whisper (model: whisper-1).
+
+        Sends the audio as a multipart upload to /v1/audio/transcriptions.
+        Returns the transcribed text, or an empty string if the audio was
+        silent / too short / unintelligible.  Callers should skip saving a
+        transcript segment when the return value is empty.
+
+        Raises OpenAIUnavailableError on network / API key errors.
+        """
+        if not self.is_configured():
+            raise OpenAIUnavailableError("OPENAI_API_KEY is not configured")
+
+        url = f"{self._base}/audio/transcriptions"
+        headers = {"Authorization": f"Bearer {self._api_key}"}
+
+        # Infer MIME type from file extension so Whisper's server-side parser
+        # knows what format to expect.
+        ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else "webm"
+        mime = {
+            "webm": "audio/webm",
+            "ogg": "audio/ogg",
+            "mp3": "audio/mpeg",
+            "mp4": "audio/mp4",
+            "wav": "audio/wav",
+            "m4a": "audio/mp4",
+            "flac": "audio/flac",
+        }.get(ext, "audio/webm")
+
+        t0 = time.monotonic()
+        logger.info(
+            "openai.transcribe model=whisper-1 bytes=%d lang=%s",
+            len(audio_data), language,
+        )
+
+        with httpx.Client(timeout=30.0) as client:
+            resp = client.post(
+                url,
+                headers=headers,
+                files={"file": (filename, audio_data, mime)},
+                data={
+                    "model": "whisper-1",
+                    "language": language,
+                    "response_format": "json",
+                },
+            )
+
+        duration_ms = int((time.monotonic() - t0) * 1000)
+
+        if resp.status_code >= 400:
+            body = (resp.text or "")[:400]
+            logger.warning(
+                "openai.transcribe.error status=%d body=%s duration_ms=%d",
+                resp.status_code, body, duration_ms,
+            )
+            raise OpenAIUnavailableError(
+                f"Whisper HTTP {resp.status_code}: {body[:200]}"
+            )
+
+        data = resp.json()
+        text = (data.get("text") or "").strip()
+        logger.info(
+            "openai.transcribe.completed duration_ms=%d chars=%d",
+            duration_ms, len(text),
+        )
+        return text
+
     @retry(
         reraise=True,
         stop=stop_after_attempt(3),

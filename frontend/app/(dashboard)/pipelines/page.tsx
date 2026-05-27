@@ -433,22 +433,6 @@ function CandidateCard({
             </p>
           </div>
         ) : null}
-        {canReject && onReject && !isMoving && (
-          <div className="mt-3 pt-3 border-t border-slate-50 opacity-0 group-hover:opacity-100 transition-opacity">
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                e.preventDefault();
-                onReject(pipeline);
-              }}
-              className="flex items-center gap-1.5 text-[10px] font-semibold text-red-400 hover:text-red-600 transition-colors uppercase tracking-wider"
-            >
-              <XCircle className="h-3.5 w-3.5" />
-              Reject Candidate
-            </button>
-          </div>
-        )}
       </div>
     </div>
   );

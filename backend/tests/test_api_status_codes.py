@@ -10,11 +10,28 @@ from sqlalchemy.exc import ProgrammingError
 
 import app.main as main_module
 from app.core.config import get_settings
+from app.core.permissions import ALL_PERMISSIONS
 from app.db.session import get_db
 from app.services.pipeline_service import PipelineService
 from app.services.permission_service import PermissionService
 
 pytestmark = pytest.mark.unit
+
+
+def _grant_all_permissions(monkeypatch) -> None:
+    """Bypass permission checks for tests that are not testing authorization.
+
+    ``require_permission`` / ``require_any_permissions`` now resolve the
+    user's effective permission set via ``PermissionService.get_user_permissions``
+    (DB call) rather than the older ``can_user`` helper.  Patch both so tests
+    remain robust to further refactors of the permission-check path.
+    """
+    monkeypatch.setattr(PermissionService, "can_user", lambda *args, **kwargs: True)
+    monkeypatch.setattr(
+        PermissionService,
+        "get_user_permissions",
+        lambda *args, **kwargs: list(ALL_PERMISSIONS),
+    )
 
 
 class _ProfileDbStub:
@@ -168,7 +185,7 @@ def test_200_when_auth_sessions_table_missing_but_token_has_sid(client, monkeypa
     )
     profile = SimpleNamespace(id=user_id, organization_id=org_id, role="recruiter", type="internal")
     main_module.app.dependency_overrides[get_db] = _db_override_auth_sessions_missing(profile)
-    monkeypatch.setattr(PermissionService, "can_user", lambda *args, **kwargs: True)
+    _grant_all_permissions(monkeypatch)
     try:
         response = client.get(
             "/api/v1/candidates",
@@ -186,7 +203,7 @@ def test_404_when_pipeline_not_found(client, force_auth, monkeypatch):
         raise HTTPException(status_code=404, detail="Pipeline not found.")
 
     monkeypatch.setattr(PipelineService, "get_pipeline_by_id", _raise_not_found)
-    monkeypatch.setattr(PermissionService, "can_user", lambda *args, **kwargs: True)
+    _grant_all_permissions(monkeypatch)
 
     response = client.get(f"/api/v1/pipelines/{uuid4()}")
     assert response.status_code == 404
@@ -200,7 +217,7 @@ def test_409_when_creating_duplicate_pipeline(client, force_auth, monkeypatch):
         raise HTTPException(status_code=409, detail="A pipeline already exists for this candidate and job.")
 
     monkeypatch.setattr(PipelineService, "create_pipeline", _raise_conflict)
-    monkeypatch.setattr(PermissionService, "can_user", lambda *args, **kwargs: True)
+    _grant_all_permissions(monkeypatch)
     response = client.post(
         "/api/v1/pipelines",
         json={
@@ -237,7 +254,7 @@ def test_patch_pipeline_stage_returns_updated_record(client, force_auth, monkeyp
         return pipeline
 
     monkeypatch.setattr(PipelineService, "update_pipeline", _update_pipeline)
-    monkeypatch.setattr(PermissionService, "can_user", lambda *args, **kwargs: True)
+    _grant_all_permissions(monkeypatch)
 
     response = client.patch(
         f"/api/v1/pipeline/{pipeline_id}",
@@ -250,7 +267,7 @@ def test_patch_pipeline_stage_returns_updated_record(client, force_auth, monkeyp
 
 
 def test_422_when_payload_is_invalid(client, force_auth, monkeypatch):
-    monkeypatch.setattr(PermissionService, "can_user", lambda *args, **kwargs: True)
+    _grant_all_permissions(monkeypatch)
     response = client.post(
         "/api/v1/candidates",
         json={

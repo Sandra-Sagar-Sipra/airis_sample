@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, UploadFile, status
 from sqlalchemy.orm import Session
 
 from app.core.dependencies import get_current_user, require_permission
@@ -11,11 +11,8 @@ from app.core.permissions import INTERVIEWS_COPILOT, INTERVIEWS_READ
 from app.db.session import get_db
 from app.schemas.auth import CurrentUser
 from app.schemas.interview_copilot import (
-    AISuggestionResponse,
     CopilotSessionResponse,
-    SuggestRequest,
     SummarizeRequest,
-    SuggestionUseRequest,
     TranscriptSegmentCreate,
     TranscriptSegmentResponse,
 )
@@ -160,76 +157,119 @@ def list_transcript_segments(
     return [TranscriptSegmentResponse.model_validate(s) for s in segments]
 
 
-# ── Suggestions ───────────────────────────────────────────────────────────────
-
-@router.post(
-    "/suggest",
-    status_code=status.HTTP_202_ACCEPTED,
-    summary="Trigger AI suggestion generation (async — check /suggestions for results)",
-)
-def trigger_suggestions(
-    interview_id: UUID,
-    payload: SuggestRequest,
-    db: Annotated[Session, Depends(get_db)],
-    background_tasks: BackgroundTasks,
-    _: Annotated[CurrentUser, Depends(require_permission(INTERVIEWS_COPILOT))],
-    current_user: Annotated[CurrentUser, Depends(get_current_user)],
-) -> dict:
-    svc = CopilotService(db)
-    return svc.trigger_suggestions(
-        interview_id=interview_id,
-        organization_id=UUID(current_user.organization_id),
-        current_user=current_user,
-        payload=payload,
-        background_tasks=background_tasks,
-    )
-
+# ── AssemblyAI realtime credential ───────────────────────────────────────────
 
 @router.get(
-    "/suggestions",
-    response_model=list[AISuggestionResponse],
-    summary="List AI suggestions for this interview",
+    "/assemblyai-token",
+    status_code=status.HTTP_200_OK,
+    summary="Return the AssemblyAI credential the browser needs to open a realtime WebSocket",
 )
-def list_suggestions(
-    interview_id: UUID,
-    db: Annotated[Session, Depends(get_db)],
-    _: Annotated[CurrentUser, Depends(require_permission(INTERVIEWS_READ))],
-    current_user: Annotated[CurrentUser, Depends(get_current_user)],
-    include_dismissed: Annotated[bool, Query()] = False,
-) -> list[AISuggestionResponse]:
-    svc = CopilotService(db)
-    suggestions = svc.list_suggestions(
-        interview_id=interview_id,
-        organization_id=UUID(current_user.organization_id),
-        current_user=current_user,
-        include_dismissed=include_dismissed,
-    )
-    return [AISuggestionResponse.model_validate(s) for s in suggestions]
-
-
-@router.patch(
-    "/suggestions/{suggestion_id}",
-    response_model=AISuggestionResponse,
-    summary="Mark a suggestion as used or dismissed",
-)
-def mark_suggestion(
-    interview_id: UUID,
-    suggestion_id: UUID,
-    payload: SuggestionUseRequest,
-    db: Annotated[Session, Depends(get_db)],
+def get_assemblyai_token(
+    interview_id: UUID,  # noqa: ARG001 — kept for route-prefix consistency
     _: Annotated[CurrentUser, Depends(require_permission(INTERVIEWS_COPILOT))],
-    current_user: Annotated[CurrentUser, Depends(get_current_user)],
-) -> AISuggestionResponse:
+) -> dict:
+    """Return the AssemblyAI API key as ``{"token": key}`` so the browser can
+    open a realtime transcription WebSocket.
+
+    AssemblyAI's realtime WebSocket (``wss://streaming.assemblyai.com/v3/ws``)
+    accepts the API key directly in the ``?token=`` query parameter.
+
+    Sending the key over HTTPS to authenticated users keeps it out of the
+    build artefacts and environment variables on the client side.  The key is
+    never written to logs by this handler.
+    """
+    from app.core.config import get_settings  # noqa: PLC0415
+
+    api_key = (get_settings().assemblyai_api_key or "").strip()
+    if not api_key:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="AssemblyAI is not configured on this deployment. Set ASSEMBLYAI_API_KEY in the backend environment.",
+        )
+
+    return {"token": api_key}
+
+
+# ── Audio transcription (Whisper — kept for post-processing / non-realtime use)
+
+
+@router.post(
+    "/transcribe-audio",
+    response_model=TranscriptSegmentResponse | None,
+    status_code=status.HTTP_200_OK,
+    summary="Transcribe an audio chunk via OpenAI Whisper and save as a transcript segment",
+)
+async def transcribe_audio_segment(
+    interview_id: UUID,
+    audio: UploadFile = File(..., description="Audio blob from MediaRecorder (webm/ogg/mp4)"),
+    speaker: str = Form(default="interviewer", description="Speaker: interviewer | candidate | unknown"),
+    language: str = Form(default="en", description="BCP-47 language code for Whisper hint"),
+    db: Session = Depends(get_db),
+    _: CurrentUser = Depends(require_permission(INTERVIEWS_COPILOT)),
+    current_user: CurrentUser = Depends(get_current_user),
+) -> TranscriptSegmentResponse | None:
+    """Receive a raw audio blob from the frontend MediaRecorder, transcribe it
+    with OpenAI Whisper, and persist the resulting text as a transcript segment.
+
+    Returns 200 with the saved segment, or 200 with null body when the audio
+    was silent / too short to produce a transcription.  Returns 503 when
+    OpenAI is not configured.
+    """
+    from app.services.transcription import (  # noqa: PLC0415
+        TranscriptionUnavailableError,
+        create_transcription_provider,
+    )
+    from app.schemas.interview_copilot import TranscriptSpeaker  # noqa: PLC0415
+
+    audio_data = await audio.read()
+
+    # Reject tiny blobs — anything under 4 KB is almost certainly silence or
+    # just the WebM container header with no audio payload.
+    if len(audio_data) < 4_000:
+        return None
+
+    provider = create_transcription_provider()
+    if not provider.is_configured():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                f"Transcription provider '{provider.provider_name}' is not configured. "
+                "Set the required API key in the backend environment."
+            ),
+        )
+
+    try:
+        text = provider.transcribe(
+            audio_data=audio_data,
+            filename=audio.filename or "chunk.webm",
+            language=language,
+        )
+    except TranscriptionUnavailableError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        )
+
+    if not text.strip():
+        return None
+
+    valid_speakers = {s.value for s in TranscriptSpeaker}
+    speaker_enum = (
+        TranscriptSpeaker(speaker) if speaker in valid_speakers else TranscriptSpeaker.UNKNOWN
+    )
+
     svc = CopilotService(db)
-    sug = svc.mark_suggestion(
+    seg = svc.add_transcript_segment(
         interview_id=interview_id,
-        suggestion_id=suggestion_id,
         organization_id=UUID(current_user.organization_id),
         current_user=current_user,
-        used=payload.used,
-        dismissed=payload.dismissed,
+        payload=TranscriptSegmentCreate(
+            speaker=speaker_enum,
+            content=text,
+            source="whisper",
+        ),
     )
-    return AISuggestionResponse.model_validate(sug)
+    return TranscriptSegmentResponse.model_validate(seg)
 
 
 # ── Summary ───────────────────────────────────────────────────────────────────

@@ -120,6 +120,11 @@ class InterviewResponse(BaseModel):
     created_by: UUID | None
     started_at: datetime | None
     ended_at: datetime | None
+    # AI-004: structured post-interview summary
+    ai_summary: dict | None = None
+    ai_summary_generated_at: datetime | None = None
+    ai_summary_provider: str | None = None
+    ai_summary_edited: bool = False
     created_at: datetime
     updated_at: datetime
 
@@ -294,3 +299,47 @@ class AvailabilitySlotResponse(BaseModel):
     timezone: str | None
 
     model_config = ConfigDict(from_attributes=True)
+
+
+# ── Interview Reminders (SCHED-006) ───────────────────────────────────────
+
+class InterviewReminderResponse(BaseModel):
+    id: UUID
+    interview_id: UUID
+    reminder_type: str
+    recipient_type: str
+    recipient_email: str
+    scheduled_for: datetime
+    status: str
+    sent_at: datetime | None
+    failure_reason: str | None
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+# ── AI Summary (AI-004) ────────────────────────────────────────────────────
+
+class AISummaryRecommendation(StrEnum):
+    STRONGLY_RECOMMEND = "strongly_recommend"
+    RECOMMEND = "recommend"
+    NEUTRAL = "neutral"
+    DO_NOT_RECOMMEND = "do_not_recommend"
+
+
+class AISummaryUpdate(BaseModel):
+    """Payload for recruiter edits to the AI-generated summary."""
+    key_strengths: list[str] | None = Field(default=None, max_length=5)
+    concerns: list[str] | None = Field(default=None, max_length=5)
+    overall_assessment: str | None = None
+    recommendation: AISummaryRecommendation | None = None
+    reasoning: str | None = None
+
+
+class AISummaryResponse(BaseModel):
+    """Structured response returned from the summary endpoints."""
+    interview_id: UUID
+    ai_summary: dict | None
+    ai_summary_generated_at: datetime | None
+    ai_summary_provider: str | None
+    ai_summary_edited: bool

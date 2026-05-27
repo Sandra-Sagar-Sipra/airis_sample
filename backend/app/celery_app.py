@@ -86,6 +86,7 @@ def create_celery_app() -> Celery:
             "app.tasks.integration_tasks",
             "app.tasks.invite_tasks",
             "app.tasks.dlq_tasks",
+            "app.tasks.interview_reminder_tasks",  # SCHED-006
             "app.candidate_management.tasks",
         ],
     )
@@ -115,6 +116,9 @@ def create_celery_app() -> Celery:
             "app.candidate_management.tasks.*": {"queue": QUEUE_AI},
             "app.tasks.notification_tasks.*": {"queue": QUEUE_NOTIFICATIONS},
             "app.tasks.integration_tasks.*": {"queue": QUEUE_INTEGRATIONS},
+            # SCHED-006 — sweep runs on background; per-reminder send on email
+            "app.tasks.interview_reminder_tasks.sweep_interview_reminders": {"queue": QUEUE_BACKGROUND},
+            "app.tasks.interview_reminder_tasks.send_single_interview_reminder": {"queue": QUEUE_EMAIL},
         },
         # Default retry policy applied to tasks that don't set their own
         task_default_retry_delay=10,
@@ -128,6 +132,13 @@ def create_celery_app() -> Celery:
             "finv05-sweep-expired-invites-hourly": {
                 "task": "app.tasks.invite_tasks.sweep_expired_invites",
                 "schedule": 3600,  # Every hour — F-INV-05 expiry sweep
+                "options": {"queue": QUEUE_BACKGROUND},
+            },
+            # SCHED-006: interview reminder sweep — runs every 5 minutes so reminders
+            # fire within 5 min of their scheduled_for time.
+            "sched006-interview-reminder-sweep": {
+                "task": "app.tasks.interview_reminder_tasks.sweep_interview_reminders",
+                "schedule": 300,  # 5 minutes
                 "options": {"queue": QUEUE_BACKGROUND},
             },
         },

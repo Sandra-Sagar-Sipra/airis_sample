@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime
 from uuid import UUID
 
-from fastapi import HTTPException, status
+from fastapi import BackgroundTasks, HTTPException, status
 from sqlalchemy import Select, func, select
 from sqlalchemy.orm import Session
+
+_svc_log = logging.getLogger("airis.interview_service")
 
 from app.models.candidate import Candidate
 from app.models.interview import (
@@ -21,6 +24,8 @@ from app.models.job import Job
 from app.models.pipeline import Pipeline
 from app.schemas.auth import CurrentUser
 from app.schemas.interview import (
+    AISummaryResponse,
+    AISummaryUpdate,
     CandidateWorkspaceInfo,
     FeedbackSummary,
     InterviewCreate,
@@ -39,10 +44,60 @@ from app.schemas.interview import (
 )
 from app.services.access_scope_service import AccessScopeService
 from app.services.interview_notification_service import InterviewNotificationService
+from app.services.interview_reminder_service import (
+    cancel_all_reminders,
+    cancel_participant_reminders,
+    reschedule_reminders,
+    schedule_candidate_reminders,
+    schedule_interviewer_reminder,
+)
 from app.services.pipeline_service import PipelineService
 
 
 ELIGIBLE_STAGES: frozenset[str] = frozenset({"screening", "interview", "offer", "placed"})
+
+
+# ── AI-004: Background summary generation ───────────────────────────────────
+
+def _run_summary_generation(interview_id: UUID) -> None:
+    """Background task: generate AI summary and persist it to the interview row.
+
+    Creates its own DB session (BackgroundTasks run in a thread pool, so the
+    request-scoped session is no longer valid by the time this executes).
+    """
+    from app.db.session import SessionLocal
+    from app.services.ai.interview_summary import generate_interview_summary
+
+    db = SessionLocal()
+    try:
+        from sqlalchemy import select as _select
+        from app.models.interview import Interview as _Interview
+
+        interview = db.scalar(_select(_Interview).where(_Interview.id == interview_id))
+        if interview is None:
+            _svc_log.warning("_run_summary_generation: interview %s not found", interview_id)
+            return
+
+        _svc_log.info("ai_summary[%s]: starting generation", interview_id)
+        summary, provider = generate_interview_summary(db, interview)
+
+        interview.ai_summary = summary
+        interview.ai_summary_generated_at = datetime.now(UTC)
+        interview.ai_summary_provider = provider
+        interview.ai_summary_edited = False
+        db.add(interview)
+        db.commit()
+        _svc_log.info(
+            "ai_summary[%s]: saved (provider=%s error=%s)",
+            interview_id,
+            provider,
+            summary.get("error") if isinstance(summary, dict) else None,
+        )
+    except Exception:
+        _svc_log.exception("ai_summary[%s]: unexpected failure in background task", interview_id)
+        db.rollback()
+    finally:
+        db.close()
 
 # Statuses shown in the interviewer queue
 QUEUE_STATUSES: frozenset[str] = frozenset({
@@ -224,6 +279,16 @@ class InterviewService:
         self.db.refresh(interview)
 
         self._notify.on_interview_scheduled(interview.id, organization_id)
+
+        # SCHED-006: schedule candidate reminder rows
+        if interview.candidate_id:
+            candidate = self.db.scalar(
+                select(Candidate).where(Candidate.id == interview.candidate_id)
+            )
+            if candidate and candidate.email:
+                schedule_candidate_reminders(self.db, interview, candidate.email)
+                self.db.commit()
+
         return interview
 
     def list_interviews(
@@ -321,8 +386,31 @@ class InterviewService:
                 self._notify.on_interview_confirmed(interview.id, organization_id)
             elif new_status_val == InterviewStatus.RESCHEDULED.value:
                 self._notify.on_interview_rescheduled(interview.id, organization_id)
+                # SCHED-006: cancel pending reminders — new ones scheduled below if
+                # scheduled_at also changed; otherwise they will be created fresh on
+                # the next status update that sets a new time.
+                cancel_all_reminders(self.db, interview.id)
+                self.db.commit()
             elif new_status_val == InterviewStatus.CANCELLED.value:
                 self._notify.on_interview_cancelled(interview.id, organization_id)
+                # SCHED-006: cancel all pending reminders
+                cancel_all_reminders(self.db, interview.id)
+                self.db.commit()
+
+        # SCHED-006: if scheduled_at changed on a non-terminal interview, reschedule
+        if "scheduled_at" in update_data and interview.status not in {
+            InterviewStatus.CANCELLED.value,
+            InterviewStatus.NO_SHOW.value,
+        }:
+            candidate_email: str | None = None
+            if interview.candidate_id:
+                candidate = self.db.scalar(
+                    select(Candidate).where(Candidate.id == interview.candidate_id)
+                )
+                if candidate:
+                    candidate_email = candidate.email
+            reschedule_reminders(self.db, interview, candidate_email)
+            self.db.commit()
 
         return interview
 
@@ -481,6 +569,14 @@ class InterviewService:
 
         self.db.commit()
         self.db.refresh(participant)
+
+        # SCHED-006: schedule interviewer reminders for the claiming user
+        from app.models.profile import Profile
+        profile = self.db.scalar(select(Profile).where(Profile.id == user_uuid))
+        if profile and profile.email:
+            schedule_interviewer_reminder(self.db, interview, profile.email)
+            self.db.commit()
+
         return participant
 
     def add_participant(
@@ -517,6 +613,18 @@ class InterviewService:
         self.db.add(participant)
         self.db.commit()
         self.db.refresh(participant)
+
+        # SCHED-006: schedule interviewer reminders for the newly added participant
+        interview = self.db.scalar(select(Interview).where(Interview.id == interview_id))
+        if interview:
+            from app.models.profile import Profile
+            profile = self.db.scalar(
+                select(Profile).where(Profile.id == payload.user_id)
+            )
+            if profile and profile.email:
+                schedule_interviewer_reminder(self.db, interview, profile.email)
+                self.db.commit()
+
         return participant
 
     def list_participants(
@@ -549,6 +657,15 @@ class InterviewService:
         )
         if participant is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Participant not found.")
+
+        # SCHED-006: cancel this participant's pending reminders before deleting
+        from app.models.profile import Profile
+        profile = self.db.scalar(
+            select(Profile).where(Profile.id == participant.user_id)
+        )
+        if profile and profile.email:
+            cancel_participant_reminders(self.db, interview_id, profile.email)
+
         self.db.delete(participant)
         self.db.commit()
 
@@ -850,6 +967,7 @@ class InterviewService:
         interview_id: UUID,
         organization_id: UUID,
         current_user: CurrentUser,
+        background_tasks: BackgroundTasks | None = None,
     ) -> Interview:
         interview = self.get_interview_by_id(interview_id, organization_id, current_user)
         _validate_status_transition(interview.status, InterviewStatus.COMPLETED.value)
@@ -858,6 +976,11 @@ class InterviewService:
         self.db.add(interview)
         self.db.commit()
         self.db.refresh(interview)
+
+        # AI-004: trigger summary generation as a background task
+        if background_tasks is not None:
+            background_tasks.add_task(_run_summary_generation, interview_id)
+
         return interview
 
     def mark_no_show(
@@ -873,6 +996,93 @@ class InterviewService:
         self.db.commit()
         self.db.refresh(interview)
         return interview
+
+    # ── Reminders (SCHED-006) ───────────────────────────────────────────
+
+    def get_reminders(
+        self,
+        interview_id: UUID,
+        organization_id: UUID,
+        current_user: CurrentUser,
+    ) -> list:
+        """Return all reminder rows for an interview."""
+        from app.services.interview_reminder_service import get_reminders_for_interview
+
+        self.get_interview_by_id(interview_id, organization_id, current_user)
+        return get_reminders_for_interview(self.db, interview_id)
+
+    # ── AI Summary (AI-004) ──────────────────────────────────────────────
+
+    def get_ai_summary(
+        self,
+        interview_id: UUID,
+        organization_id: UUID,
+        current_user: CurrentUser,
+    ) -> AISummaryResponse:
+        interview = self.get_interview_by_id(interview_id, organization_id, current_user)
+        return AISummaryResponse(
+            interview_id=interview.id,
+            ai_summary=interview.ai_summary,
+            ai_summary_generated_at=interview.ai_summary_generated_at,
+            ai_summary_provider=interview.ai_summary_provider,
+            ai_summary_edited=interview.ai_summary_edited,
+        )
+
+    def regenerate_ai_summary(
+        self,
+        interview_id: UUID,
+        organization_id: UUID,
+        current_user: CurrentUser,
+        background_tasks: BackgroundTasks,
+    ) -> dict:
+        """Manually re-trigger summary generation for an already-completed interview."""
+        interview = self.get_interview_by_id(interview_id, organization_id, current_user)
+        if interview.status not in {
+            InterviewStatus.COMPLETED.value,
+            InterviewStatus.FEEDBACK_PENDING.value,
+            InterviewStatus.FEEDBACK_SUBMITTED.value,
+        }:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "Summary generation is only available for completed interviews. "
+                    f"Current status is '{interview.status}'."
+                ),
+            )
+        background_tasks.add_task(_run_summary_generation, interview_id)
+        return {"status": "generating", "interview_id": str(interview_id)}
+
+    def update_ai_summary(
+        self,
+        interview_id: UUID,
+        organization_id: UUID,
+        current_user: CurrentUser,
+        payload: AISummaryUpdate,
+    ) -> AISummaryResponse:
+        """Allow recruiters to edit the AI-generated summary."""
+        interview = self.get_interview_by_id(interview_id, organization_id, current_user)
+
+        # Merge edits into the existing summary dict (or start fresh)
+        current: dict = dict(interview.ai_summary) if isinstance(interview.ai_summary, dict) else {}
+
+        update_data = payload.model_dump(exclude_unset=True)
+        if "recommendation" in update_data and update_data["recommendation"] is not None:
+            update_data["recommendation"] = update_data["recommendation"].value
+
+        current.update(update_data)
+        interview.ai_summary = current
+        interview.ai_summary_edited = True
+        self.db.add(interview)
+        self.db.commit()
+        self.db.refresh(interview)
+
+        return AISummaryResponse(
+            interview_id=interview.id,
+            ai_summary=interview.ai_summary,
+            ai_summary_generated_at=interview.ai_summary_generated_at,
+            ai_summary_provider=interview.ai_summary_provider,
+            ai_summary_edited=interview.ai_summary_edited,
+        )
 
     # ── Feedback summary ─────────────────────────────────────────────────
 

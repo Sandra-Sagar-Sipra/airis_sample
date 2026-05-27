@@ -5,6 +5,7 @@ from uuid import UUID, uuid4
 import pytest
 from fastapi import HTTPException
 
+from app.core.permissions import ALL_PERMISSIONS
 from app.schemas.pipeline import PipelineCreate
 from app.services.candidate_service import CandidateService
 from app.services.pipeline_service import PipelineService
@@ -20,7 +21,9 @@ pytestmark = pytest.mark.unit
         ("/api/v1/candidates", "app.services.candidate_service.CandidateService", "list_candidates"),
         ("/api/v1/clients", "app.services.client_service.ClientService", "list_clients"),
         ("/api/v1/jobs", "app.services.job_service.JobService", "list_jobs"),
-        ("/api/v1/pipelines", "app.services.pipeline_service.PipelineService", "list_pipelines"),
+        # The GET /api/v1/pipelines route delegates to list_pipelines_paginated
+        # (introduced in PIPE-004) which returns (items, total, stage_counts).
+        ("/api/v1/pipelines", "app.services.pipeline_service.PipelineService", "list_pipelines_paginated"),
         ("/api/v1/interviews", "app.services.interview_service.InterviewService", "list_interviews"),
     ],
 )
@@ -37,13 +40,24 @@ def test_list_endpoints_are_scoped_by_organization_id(
 
     def _capture_org(self, organization_id, *args, **kwargs):
         captured["organization_id"] = organization_id
+        # list_pipelines_paginated returns (items, total, stage_counts);
+        # all other list_* methods return a plain list.
+        if method_name == "list_pipelines_paginated":
+            return [], 0, {}
         return []
 
     module_name, class_name = service_class.rsplit(".", maxsplit=1)
     module = __import__(module_name, fromlist=[class_name])
     klass = getattr(module, class_name)
     monkeypatch.setattr(klass, method_name, _capture_org)
+    # Patch both permission paths: can_user (old) and get_user_permissions (new,
+    # used by _effective_permissions_for_request in require_permission).
     monkeypatch.setattr(PermissionService, "can_user", lambda *args, **kwargs: True)
+    monkeypatch.setattr(
+        PermissionService,
+        "get_user_permissions",
+        lambda *args, **kwargs: list(ALL_PERMISSIONS),
+    )
 
     response = client.get(path)
     assert response.status_code == 200

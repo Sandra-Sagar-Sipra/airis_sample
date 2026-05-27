@@ -11,6 +11,7 @@ import { WorkspaceRightPanel } from "@/components/interviews/workspace/Workspace
 import { ScorecardModal } from "@/components/interviews/workspace/ScorecardModal";
 import { InterviewStatusBadge } from "@/components/interviews/InterviewStatusBadge";
 import { useAuthStore } from "@/store/auth-store";
+import { LiveKitProvider } from "@/contexts/LiveKitContext";
 import type { Interview, InterviewFeedback, WorkspaceData } from "@/lib/api/types";
 
 const PRE_INTERVIEW_STATUSES = new Set([
@@ -102,7 +103,10 @@ export default function InterviewWorkspacePage() {
     : "Interview";
 
   return (
-    <>
+    // LiveKitProvider shares the Room instance between LiveKitRoom.tsx (center
+    // panel) and TranscriptPanel.tsx (right panel) without props drilling.
+    // The context holds a MutableRef — no re-renders triggered on room change.
+    <LiveKitProvider>
       {/* Full-height 3-panel layout */}
       <div className="flex flex-col h-full -m-4 sm:-m-6 lg:-m-8">
         {/* Topbar */}
@@ -171,6 +175,6 @@ export default function InterviewWorkspacePage() {
           onSubmitted={handleFeedbackSubmitted}
         />
       )}
-    </>
+    </LiveKitProvider>
   );
 }

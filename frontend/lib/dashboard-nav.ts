@@ -23,6 +23,8 @@ export type SidebarNavItem = {
   anyOfPermissions?: readonly string[];
   /** When true, only organization admins see this item. */
   adminOnly?: boolean;
+  /** When true, only vendors see this item. */
+  vendorOnly?: boolean;
   /** When true, admins see the item even without the listed permissions (e.g. user management). */
   adminMayAccess?: boolean;
   /** When false, used only for route access checks (not shown in the sidebar). */
@@ -51,6 +53,7 @@ export const SIDEBAR_NAV_ITEMS: readonly SidebarNavItem[] = [
     name: "My Submissions",
     path: "/vendor/submissions",
     anyOfPermissions: [NAV_PERMISSION_CODES.SUBMISSIONS_READ_OWN],
+    vendorOnly: true,
   },
   {
     // Unified pipeline workspace (table + kanban toggle at /pipelines).
@@ -66,9 +69,15 @@ export const SIDEBAR_NAV_ITEMS: readonly SidebarNavItem[] = [
     showInSidebar: false,
   },
   {
-    name: "Pipeline Analytics",
+    name: "Pipeline Intelligence",
     path: "/pipeline-analytics",
     anyOfPermissions: [NAV_PERMISSION_CODES.PIPELINE_READ],
+    showInSidebar: false,
+  },
+  {
+    name: "Analytics",
+    path: "/analytics",
+    anyOfPermissions: [NAV_PERMISSION_CODES.JOBS_READ],
   },
   // Pipeline detail pages (/pipelines/{id}) — same RBAC as Pipeline workspace.
   {
@@ -172,6 +181,9 @@ export function matchesSidebarNavItem(
   permissions: readonly Permission[],
   item: SidebarNavItem
 ): boolean {
+  if (item.vendorOnly && normalizeRole(role) !== "vendor") {
+    return false;
+  }
   if (item.adminOnly) {
     return isAdminRole(role);
   }

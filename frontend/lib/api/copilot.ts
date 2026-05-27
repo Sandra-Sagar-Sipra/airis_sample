@@ -1,10 +1,7 @@
 import { API_BASE_URL, apiRequest, getWsApiBase } from "@/lib/api/client";
+import type { TranscriptSpeaker } from "@/lib/api/types";
 import type {
-  AISuggestion,
-  CopilotSession,
   CopilotWsEvent,
-  SuggestRequestPayload,
-  SuggestionMarkPayload,
   TranscriptSegment,
   TranscriptSegmentPayload,
 } from "@/lib/api/types";
@@ -17,8 +14,8 @@ const base = (interviewId: string) =>
 /** Create or retrieve the copilot session for this interview. */
 export async function startCopilotSession(
   interviewId: string
-): Promise<CopilotSession> {
-  return apiRequest<CopilotSession>(`${base(interviewId)}/session`, {
+): Promise<{ id: string; status: string }> {
+  return apiRequest<{ id: string; status: string }>(`${base(interviewId)}/session`, {
     method: "POST",
   }, 0);
 }
@@ -26,8 +23,8 @@ export async function startCopilotSession(
 /** Get the existing copilot session (throws 404 if not started). */
 export async function getCopilotSession(
   interviewId: string
-): Promise<CopilotSession> {
-  return apiRequest<CopilotSession>(`${base(interviewId)}/session`, {}, 0);
+): Promise<{ id: string; status: string }> {
+  return apiRequest<{ id: string; status: string }>(`${base(interviewId)}/session`, {}, 0);
 }
 
 // ── Transcript ────────────────────────────────────────────────────────────────
@@ -42,6 +39,64 @@ export async function addTranscriptSegment(
   }, 0);
 }
 
+/**
+ * POST an audio blob to the backend Whisper transcription endpoint.
+ *
+ * Returns the saved TranscriptSegment, or null when the audio was too short /
+ * silent to produce a transcription or OpenAI is not configured.
+ *
+ * Uses raw fetch (not apiRequest) because multipart/form-data requires the
+ * browser to set the Content-Type boundary automatically — apiRequest force-
+ * sets "Content-Type: application/json" which breaks FormData uploads.
+ */
+export async function transcribeAudioChunk(
+  interviewId: string,
+  audioBlob: Blob,
+  speaker: TranscriptSpeaker | "interviewer" | "candidate" | "unknown",
+): Promise<TranscriptSegment | null> {
+  const token =
+    typeof window !== "undefined"
+      ? window.localStorage.getItem("airis_access_token")
+      : null;
+
+  // Derive the correct file extension from the blob MIME type so the backend
+  // can pass the right filename to Whisper's file parser.
+  const ext = audioBlob.type.includes("ogg") ? "ogg" : "webm";
+
+  const formData = new FormData();
+  formData.append("audio", audioBlob, `chunk.${ext}`);
+  formData.append("speaker", speaker);
+  formData.append("language", "en");
+
+  // Build the full URL.  API_BASE_URL is "/api/v1" in the browser (proxied by
+  // Next.js) and the direct backend URL during SSR — this function is client-
+  // only so we always hit the proxy path.
+  const url = `${API_BASE_URL}/interviews/${interviewId}/copilot/transcribe-audio`;
+
+  let resp: Response;
+  try {
+    resp = await fetch(url, {
+      method: "POST",
+      // DO NOT set Content-Type — the browser sets "multipart/form-data; boundary=..."
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      body: formData,
+    });
+  } catch {
+    return null; // network error — caller can retry on the next chunk
+  }
+
+  if (!resp.ok) return null;
+
+  const text = await resp.text();
+  if (!text || text === "null") return null;
+
+  try {
+    return JSON.parse(text) as TranscriptSegment;
+  } catch {
+    return null;
+  }
+}
+
 export async function getTranscript(
   interviewId: string,
   limit = 200,
@@ -54,68 +109,20 @@ export async function getTranscript(
   );
 }
 
-// ── Suggestions ───────────────────────────────────────────────────────────────
+// ── AssemblyAI realtime ───────────────────────────────────────────────────────
 
 /**
- * Trigger AI suggestion generation.
- * Returns immediately (202) — poll getSuggestions() or wait for WS event.
+ * Request the AssemblyAI API token from the AIRIS backend.
+ *
+ * The backend returns the token so the browser never holds the raw API key
+ * in build artefacts or environment variables.
  */
-export async function requestSuggestions(
-  interviewId: string,
-  payload: SuggestRequestPayload = {}
-): Promise<{ queued: boolean; session_id: string }> {
-  return apiRequest<{ queued: boolean; session_id: string }>(
-    `${base(interviewId)}/suggest`,
-    {
-      method: "POST",
-      body: JSON.stringify({ count: 3, ...payload }),
-    },
-    0
-  );
-}
-
-export async function getSuggestions(
-  interviewId: string,
-  includeDismissed = false
-): Promise<AISuggestion[]> {
-  return apiRequest<AISuggestion[]>(
-    `${base(interviewId)}/suggestions?include_dismissed=${includeDismissed}`,
+export async function getAssemblyAIToken(
+  interviewId: string
+): Promise<{ token: string }> {
+  return apiRequest<{ token: string }>(
+    `${base(interviewId)}/assemblyai-token`,
     {},
-    0
-  );
-}
-
-export async function markSuggestion(
-  interviewId: string,
-  suggestionId: string,
-  payload: SuggestionMarkPayload
-): Promise<AISuggestion> {
-  return apiRequest<AISuggestion>(
-    `${base(interviewId)}/suggestions/${suggestionId}`,
-    {
-      method: "PATCH",
-      body: JSON.stringify(payload),
-    },
-    0
-  );
-}
-
-// ── Summary ───────────────────────────────────────────────────────────────────
-
-/**
- * Trigger post-interview AI summary generation.
- * Returns immediately (202) — poll getCopilotSession() for summary field.
- */
-export async function requestSummary(
-  interviewId: string,
-  force = false
-): Promise<{ queued: boolean; session_id: string }> {
-  return apiRequest<{ queued: boolean; session_id: string }>(
-    `${base(interviewId)}/summarize`,
-    {
-      method: "POST",
-      body: JSON.stringify({ force }),
-    },
     0
   );
 }
@@ -124,6 +131,9 @@ export async function requestSummary(
 
 /**
  * Open a WebSocket connection to the copilot real-time channel.
+ *
+ * Used by TranscriptPanel to receive `transcript_added` push events so the
+ * transcript list updates without polling.
  *
  * Usage:
  *   const ws = openCopilotWs(interviewId, token, {

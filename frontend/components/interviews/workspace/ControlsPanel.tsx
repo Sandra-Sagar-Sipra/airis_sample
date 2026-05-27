@@ -3,11 +3,12 @@
 import { useEffect, useRef, useState } from "react";
 import {
   Play, CheckCircle, XCircle, ClipboardList, Users,
-  CalendarDays, Clock, Lock, Eye,
+  Bell, CalendarDays, Clock, Lock, Eye,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { InterviewStatusBadge } from "@/components/interviews/InterviewStatusBadge";
 import { completeInterview, markNoShow, startInterview } from "@/lib/api/interviews";
+import { InterviewRemindersWidget } from "./InterviewRemindersWidget";
 import type { Interview, InterviewFeedback, InterviewParticipant } from "@/lib/api/types";
 
 const ROUND_LABELS: Record<string, string> = {
@@ -321,6 +322,15 @@ export function ControlsPanel({
       {error && (
         <p className="text-xs text-red-600 bg-red-50 rounded-lg px-3 py-2 border border-red-200">{error}</p>
       )}
+
+      {/* Reminders (SCHED-006) */}
+      <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-2">
+        <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider flex items-center gap-1.5">
+          <Bell className="w-3.5 h-3.5" />
+          Reminders
+        </h3>
+        <InterviewRemindersWidget interviewId={interview.id} />
+      </div>
 
       {/* Panel roster */}
       <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-3">

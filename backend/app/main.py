@@ -209,8 +209,14 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 @app.middleware("http")
 async def request_timing_middleware(request: Request, call_next):
+    import asyncio
+    from fastapi.responses import Response
     t0 = time.monotonic()
-    response = await call_next(request)
+    try:
+        response = await call_next(request)
+    except asyncio.CancelledError:
+        return Response("Client Closed Request", status_code=499)
+        
     duration_ms = int((time.monotonic() - t0) * 1000)
     response.headers["X-Response-Time"] = f"{duration_ms}ms"
     if duration_ms > 500:
@@ -298,4 +304,5 @@ app.include_router(pipeline_analytics_router, prefix="/api/v1")
 app.include_router(offer_router, prefix="/api/v1")
 app.include_router(sourcing_router, prefix="/api/v1/sourcing", tags=["sourcing"])
 app.include_router(ai_interview_questions_router, prefix="/api/v1")
-
+from app.analytics.routes import router as analytics_router
+app.include_router(analytics_router, prefix="/api/v1")

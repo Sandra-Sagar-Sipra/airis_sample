@@ -1589,11 +1589,37 @@ export default function CandidateDetailPage() {
                         <MessageSquare className="w-4 h-4 text-[#FF5A1F]" />
                         <h2 className="text-base font-semibold text-gray-900">Communication Hub</h2>
                       </div>
+                      <div className="relative group">
+                        <button
+                          className={cn(
+                            "p-1.5 rounded-md transition-colors border outline-none",
+                            activeCommunicationTab === "templates"
+                              ? "bg-gray-100 text-gray-900 border-gray-200 shadow-sm"
+                              : "text-gray-400 hover:text-gray-700 hover:bg-gray-50 border-transparent"
+                          )}
+                          title="Menu"
+                        >
+                          <MoreVertical className="w-4 h-4" />
+                        </button>
+                        {/* Invisible bridge to prevent hover loss */}
+                        <div className="absolute right-0 w-full h-3 bg-transparent top-full z-40" />
+                        <div className="absolute right-0 top-[calc(100%+4px)] w-48 rounded-xl bg-white shadow-[0_8px_30px_rgba(0,0,0,0.12)] ring-1 ring-black/5 border border-gray-100 z-50 overflow-hidden opacity-0 invisible translate-y-2 transition-all duration-200 ease-out group-hover:opacity-100 group-hover:visible group-hover:translate-y-0">
+                          <div className="p-1">
+                            <button
+                              onClick={() => setActiveCommunicationTab("templates")}
+                              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-gray-600 hover:bg-[#FF5A1F]/10 hover:text-[#FF5A1F] font-semibold transition-colors"
+                            >
+                              <FileText className="w-4 h-4" />
+                              Manage Templates
+                            </button>
+                          </div>
+                        </div>
+                      </div>
                     </div>
                   </div>
                   <div className="border-b border-gray-100 px-4">
                     <div className="flex gap-4 text-sm">
-                      {(["timeline", "email", "whatsapp", "templates"] as const).map((tabKey) => (
+                      {(["timeline", "email", "whatsapp"] as const).map((tabKey) => (
                         <button
                           key={tabKey}
                           onClick={() => setActiveCommunicationTab(tabKey)}

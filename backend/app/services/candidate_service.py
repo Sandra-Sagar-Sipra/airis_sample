@@ -213,6 +213,33 @@ class CandidateService:
         organization_id: UUID,
         current_user: CurrentUser,
     ) -> None:
+        """Permanent hard delete — removes candidate and all dependent ATS/pipeline data."""
+        from app.candidate_management.models import Candidate as CmCandidate
+        from app.services.candidate_hard_delete import (
+            delete_candidate_row,
+            purge_candidate_dependents,
+            refresh_job_match_caches,
+        )
+
+        candidate = self._get_candidate_row_for_mutation(candidate_id, organization_id, current_user)
+        cid = candidate.id
+        workspace_id = self.db.scalar(
+            select(CmCandidate.workspace_id).where(
+                CmCandidate.id == cid,
+                CmCandidate.org_id == organization_id,
+            )
+        ) or organization_id
+
+        job_ids = purge_candidate_dependents(self.db, candidate_id=cid, organization_id=organization_id)
+        deleted = delete_candidate_row(
+            self.db,
+            org_id=organization_id,
+            workspace_id=workspace_id,
+            candidate_id=cid,
+        )
+        if deleted == 0:
+            self.db.delete(candidate)
+        refresh_job_match_caches(self.db, organization_id=organization_id, job_ids=job_ids)
         """Permanent hard delete — removes candidate row and dependent pipeline rows."""
         import sqlalchemy as sa
         from app.models.application import Application

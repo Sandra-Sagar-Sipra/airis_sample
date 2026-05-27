@@ -645,43 +645,26 @@ class CandidateManagementService:
         workspace_id: UUID,
         candidate_id: UUID,
     ) -> None:
-        import sqlalchemy as sa
-        from app.models.job_submission import JobSubmission
-        
-        def _safe_delete(model):
-            try:
-                with self.db.begin_nested():
-                    self.db.execute(sa.delete(model).where(model.candidate_id == candidate_id))
-            except sa.exc.ProgrammingError as e:
-                logger.warning(f"Table for {model.__name__} might be missing, ignoring: {e}")
-            except Exception as e:
-                logger.warning(f"Error deleting from {model.__name__}: {e}")
+        from app.services.candidate_hard_delete import (
+            delete_candidate_row,
+            purge_candidate_dependents,
+            refresh_job_match_caches,
+        )
 
-        # Delete dependent records safely
-        _safe_delete(Pipeline)
-        _safe_delete(Application)
-        _safe_delete(JobSubmission)
-
-        # Nullify candidate_id in BulkUploadItem
-        try:
-            with self.db.begin_nested():
-                self.db.execute(
-                    sa.update(BulkUploadItem)
-                    .where(BulkUploadItem.candidate_id == candidate_id)
-                    .values(candidate_id=None)
-                )
-        except sa.exc.ProgrammingError as e:
-            logger.warning(f"Table for BulkUploadItem might be missing, ignoring: {e}")
-        except Exception as e:
-            logger.warning(f"Error updating BulkUploadItem: {e}")
-
-        deleted_count = self.repository.hard_delete_candidate(
+        job_ids = purge_candidate_dependents(
+            self.db,
+            candidate_id=candidate_id,
+            organization_id=org_id,
+        )
+        deleted_count = delete_candidate_row(
+            self.db,
             org_id=org_id,
             workspace_id=workspace_id,
             candidate_id=candidate_id,
         )
         if deleted_count == 0:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found.")
+        refresh_job_match_caches(self.db, organization_id=org_id, job_ids=job_ids)
         self.db.commit()
 
     def bulk_update_stage(
@@ -801,46 +784,32 @@ class CandidateManagementService:
         actor_role: str | None,
         payload: CandidateBulkDeleteRequest,
     ) -> int:
-        import sqlalchemy as sa
-        from app.models.job_submission import JobSubmission
-        
+        from app.services.candidate_hard_delete import (
+            delete_candidate_row,
+            purge_candidate_dependents,
+            refresh_job_match_caches,
+        )
+
         candidate_ids = payload.candidate_ids
         if not candidate_ids:
             return 0
 
-        def _safe_delete_bulk(model):
-            try:
-                with self.db.begin_nested():
-                    self.db.execute(sa.delete(model).where(model.candidate_id.in_(candidate_ids)))
-            except sa.exc.ProgrammingError as e:
-                logger.warning(f"Table for {model.__name__} might be missing, ignoring: {e}")
-            except Exception as e:
-                logger.warning(f"Error deleting from {model.__name__}: {e}")
-
-        _safe_delete_bulk(Pipeline)
-        _safe_delete_bulk(Application)
-        _safe_delete_bulk(JobSubmission)
-
-        try:
-            with self.db.begin_nested():
-                self.db.execute(
-                    sa.update(BulkUploadItem)
-                    .where(BulkUploadItem.candidate_id.in_(candidate_ids))
-                    .values(candidate_id=None)
-                )
-        except sa.exc.ProgrammingError as e:
-            logger.warning(f"Table for BulkUploadItem might be missing, ignoring: {e}")
-        except Exception as e:
-            logger.warning(f"Error updating BulkUploadItem: {e}")
-
+        all_job_ids: set[UUID] = set()
         deleted_count = 0
         for candidate_id in candidate_ids:
-            count = self.repository.hard_delete_candidate(
+            job_ids = purge_candidate_dependents(
+                self.db,
+                candidate_id=candidate_id,
+                organization_id=org_id,
+            )
+            all_job_ids.update(job_ids)
+            deleted_count += delete_candidate_row(
+                self.db,
                 org_id=org_id,
                 workspace_id=workspace_id,
                 candidate_id=candidate_id,
             )
-            deleted_count += count
+        refresh_job_match_caches(self.db, organization_id=org_id, job_ids=all_job_ids)
         self.db.commit()
         return deleted_count
 

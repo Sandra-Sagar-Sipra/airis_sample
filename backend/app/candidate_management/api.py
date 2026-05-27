@@ -182,7 +182,7 @@ def _service(db: Session) -> CandidateManagementService:
     # union JobSkill rows into its skill catalogue.
     local_parser = LocalResumeParser(db=db)
     ai_fallback: HttpAIService | None = None
-    if os.getenv("AI_SERVICES_URL") or os.getenv("GROQ_API_KEY"):
+    if os.getenv("AI_SERVICES_URL") or os.getenv("GROQ_API_KEY") or os.getenv("GROQ_API_KEY_BACKUP"):
         try:
             ai_fallback = HttpAIService()
         except Exception:  # pragma: no cover - defensive

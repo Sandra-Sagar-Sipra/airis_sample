@@ -8,6 +8,7 @@ import os
 
 from app.core.config import get_settings
 from app.candidate_management.schemas import CandidateSkillInput, ResumeParseResult
+from app.services.llm_json_completion import LlmJsonCompletionError, complete_json_sync
 
 
 class HttpAIService:
@@ -87,46 +88,25 @@ RESUME TEXT:
 {text}"""
 
         try:
-            with httpx.Client(timeout=30.0) as client:
-                response = client.post(
-                    "https://api.groq.com/openai/v1/chat/completions",
-                    headers={
-                        "Authorization": f"Bearer {settings.groq_api_key}",
-                        "Content-Type": "application/json",
-                    },
-                    json={
-                        "model": "llama-3.3-70b-versatile",
-                        "messages": [{"role": "user", "content": prompt}],
-                        "temperature": 0.1,
-                        "max_tokens": 1500,
-                    }
-                )
-                response.raise_for_status()
-                result = response.json()
-                content = result["choices"][0]["message"]["content"]
-                
-                # Defensive cleaning of JSON block
-                if "```json" in content:
-                    content = content.split("```json")[1].split("```")[0].strip()
-                elif "```" in content:
-                    content = content.split("```")[1].split("```")[0].strip()
-                
-                payload = json.loads(content.strip())
-                payload["ai_parse_version"] = "groq-llama-3.3-70b"
-                
-                # Ensure skills years_experience is int
-                if "extracted_skills" in payload:
-                    for skill in payload["extracted_skills"]:
-                        if skill.get("years_experience") is not None:
-                            try:
-                                skill["years_experience"] = int(float(skill["years_experience"]))
-                            except (ValueError, TypeError):
-                                skill["years_experience"] = None
-                
-                return payload
+            payload, version_tag = complete_json_sync(prompt, settings=settings)
+            payload["ai_parse_version"] = version_tag
+            if "extracted_skills" in payload:
+                for skill in payload["extracted_skills"]:
+                    if skill.get("years_experience") is not None:
+                        try:
+                            skill["years_experience"] = int(float(skill["years_experience"]))
+                        except (ValueError, TypeError):
+                            skill["years_experience"] = None
+            return payload
+        except LlmJsonCompletionError as e:
+            import logging
+
+            logging.getLogger(__name__).error("LLM resume parsing failed: %s", e)
+            return self._local_parse_payload(resume_s3_key)
         except Exception as e:
             import logging
-            logging.getLogger(__name__).error(f"Groq parsing failed: {e}")
+
+            logging.getLogger(__name__).error("Resume parsing failed: %s", e)
             return self._local_parse_payload(resume_s3_key)
 
     def _local_parse_payload(self, resume_s3_key: str) -> dict:

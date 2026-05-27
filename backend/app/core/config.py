@@ -134,10 +134,20 @@ class Settings(BaseSettings):
         default=None, validation_alias=AliasChoices("TWILIO_WHATSAPP_NUMBER", "twilio_whatsapp_number")
     )
 
-    # Groq API key for AI-powered JD parsing.
+    # Groq API key — primary for resume/JD parsing.
     groq_api_key: str | None = Field(
         default=None,
         validation_alias=AliasChoices("GROQ_API_KEY", "groq_api_key"),
+    )
+    # Second Groq key — backup when primary fails (resume/JD parse only).
+    groq_api_key_backup: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("GROQ_API_KEY_BACKUP", "groq_api_key_backup"),
+    )
+    # Resume/JD parse: try backup Groq (then Grok) when primary Groq fails.
+    ai_parse_enable_backup: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("AI_PARSE_ENABLE_BACKUP", "ai_parse_enable_backup"),
     )
 
     # Groq API key for ATS semantic enrichment (OpenAI-compatible API).
@@ -244,6 +254,15 @@ class Settings(BaseSettings):
     assemblyai_api_key: str | None = Field(
         default=None,
         validation_alias=AliasChoices("ASSEMBLYAI_API_KEY", "assemblyai_api_key"),
+    )
+
+    # ── Transcription provider selection ────────────────────────────────────────
+    # Controls which backend is used for the /copilot/transcribe-audio endpoint.
+    # "whisper"  (default) — OpenAI Whisper; requires OPENAI_API_KEY.
+    # Future values: "assemblyai-batch", "deepgram", etc.
+    transcription_provider: str = Field(
+        default="whisper",
+        validation_alias=AliasChoices("TRANSCRIPTION_PROVIDER", "transcription_provider"),
     )
 
     # ── Celery / Redis (INFRA-006) ────────────────────────────────────────────
