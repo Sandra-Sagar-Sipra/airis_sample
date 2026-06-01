@@ -40,7 +40,7 @@ Set the service **root directory** to `backend`.
 | Start command | `uvicorn app.main:app --host 0.0.0.0 --port $PORT` |
 | Health check | `/api/v1/health` |
 
-Railway auto-detects Python from **`backend/requirements.txt`** (single inlined file — no `-r` chain) and **`runtime.txt`** (`python-3.11.9`).
+Railway auto-detects Python from **`requirements.txt`** and **`runtime.txt`** (`python-3.11.11`). Use the **Nixpacks** builder (see `nixpacks.toml`). Do not add `.python-version` — Railpack/mise may fail on older patch releases missing GitHub artifact attestations.
 
 **Important:** Do not commit virtualenvs (`.venv*`). An old Windows `pip freeze` in git history contained `pywin32==311` / `pypiwin32==223`; the current `requirements.txt` does not. After pulling, redeploy with **clear build cache**.
 
