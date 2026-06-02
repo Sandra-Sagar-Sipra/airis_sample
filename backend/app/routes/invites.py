@@ -35,10 +35,11 @@ from app.schemas.invite import (
     InviteResponse,
     SmtpCheckResponse,
 )
-from app.services.email_service import send_invite_email_background
+from app.services.email_service import (
+    send_invite_email,
+    update_invite_delivery_status,
+)
 from app.services.organization_role_service import get_role_id_by_key
-from app.services.task_runner import dispatch_task
-from app.tasks.email_tasks import send_invite_email_task
 
 logger = logging.getLogger(__name__)
 
@@ -212,25 +213,30 @@ def create_invite(
         ) from None
     db.refresh(invite)
 
-    # ── Dispatch email off HTTP thread ────────────────────────────────────────
-    # apply_async blocks for 60 s when Redis is unreachable, killing the DB
-    # connection.  dispatch_task submits to a ThreadPoolExecutor and returns
-    # immediately.  Delivery status is written back to DB by the worker.
+    # TEMP production behavior: send inline so SMTP failures surface to API clients.
     logger.info(
-        "invites.create.email_dispatch",
+        "invites.create.email_send_inline",
         extra={"invite_id": str(invite.id), "email": normalized_email, "role": role_key},
     )
-    dispatch_task(
-        task=send_invite_email_task,
-        fallback=send_invite_email_background,
-        kwargs={
-            "to_email": normalized_email,
-            "token": invite.token,
-            "role": role_key,
-            "expires_at_iso": invite.expires_at.isoformat(),
-            "invite_id": str(invite.id),
-        },
-    )
+    try:
+        delivery = send_invite_email(
+            normalized_email,
+            invite.token,
+            role=role_key,
+            expires_at=invite.expires_at,
+        )
+        update_invite_delivery_status(
+            str(invite.id),
+            status="sent",
+            message_id=delivery["message_id"],
+            provider=delivery["provider"],
+        )
+    except Exception as exc:
+        update_invite_delivery_status(str(invite.id), status="failed", error=str(exc))
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Invite email delivery failed. Please verify SMTP settings and retry.",
+        ) from exc
 
     return InviteCreateResponse(
         message="Invite created successfully.",
@@ -327,20 +333,28 @@ def resend_invite(
         db.refresh(invite)
 
         logger.info(
-            "invites.resend.email_dispatch",
+            "invites.resend.email_send_inline",
             extra={"invite_id": str(invite_id), "email": invite.email},
         )
-        dispatch_task(
-            task=send_invite_email_task,
-            fallback=send_invite_email_background,
-            kwargs={
-                "to_email": invite.email,
-                "token": invite.token,
-                "role": invite.role,
-                "expires_at_iso": invite.expires_at.isoformat(),
-                "invite_id": str(invite.id),
-            },
-        )
+        try:
+            delivery = send_invite_email(
+                invite.email,
+                invite.token,
+                role=invite.role,
+                expires_at=invite.expires_at,
+            )
+            update_invite_delivery_status(
+                str(invite.id),
+                status="sent",
+                message_id=delivery["message_id"],
+                provider=delivery["provider"],
+            )
+        except Exception as exc:
+            update_invite_delivery_status(str(invite.id), status="failed", error=str(exc))
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Invite resend email delivery failed. Please verify SMTP settings and retry.",
+            ) from exc
 
         return InviteResendResponse(message="Invite resent successfully.")
 

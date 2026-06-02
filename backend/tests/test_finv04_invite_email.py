@@ -52,13 +52,11 @@ def _make_settings(**overrides):
 
 
 def test_ac1_email_dispatched_on_create() -> None:
-    """dispatch_task is called with correct kwargs when creating an invite."""
-    from unittest.mock import patch
-    from app.services.email_service import send_invite_email_background
-    from app.tasks.email_tasks import send_invite_email_task
+    """Invite create performs SMTP send inline and records sent delivery state."""
 
     with (
-        patch("app.routes.invites.dispatch_task") as mock_dispatch,
+        patch("app.routes.invites.send_invite_email", return_value={"message_id": "<m@airis.invite>", "provider": "brevo_smtp"}) as mock_send,
+        patch("app.routes.invites.update_invite_delivery_status") as mock_update,
         patch("app.routes.invites.get_role_id_by_key", return_value=uuid4()),
         patch("app.routes.invites._now_utc", return_value=_NOW),
     ):
@@ -98,20 +96,22 @@ def test_ac1_email_dispatched_on_create() -> None:
             app.dependency_overrides.clear()
 
     assert resp.status_code == 201, resp.text
-    mock_dispatch.assert_called_once()
-    call_kwargs = mock_dispatch.call_args
-    assert call_kwargs.kwargs["task"] is send_invite_email_task
-    assert call_kwargs.kwargs["fallback"] is send_invite_email_background
-    sent_kwargs = call_kwargs.kwargs["kwargs"]
-    assert sent_kwargs["to_email"] == "new@example.com"
-    assert sent_kwargs["role"] == "recruiter"
-    assert "token" in sent_kwargs
-    assert "expires_at_iso" in sent_kwargs
-    assert "invite_id" in sent_kwargs
+    mock_send.assert_called_once()
+    send_args = mock_send.call_args.args
+    send_kwargs = mock_send.call_args.kwargs
+    assert send_args[0] == "new@example.com"
+    assert send_kwargs["role"] == "recruiter"
+    assert send_kwargs["expires_at"] == _FUTURE
+    mock_update.assert_called_once_with(
+        str(_INV_ID),
+        status="sent",
+        message_id="<m@airis.invite>",
+        provider="brevo_smtp",
+    )
 
 
 def test_ac2_email_dispatched_on_resend() -> None:
-    """dispatch_task is called when resending an invite."""
+    """Invite resend performs SMTP send inline and records sent delivery state."""
     import app.main as main_module
     from app.core.dependencies import get_current_user
     from app.db.session import get_db
@@ -145,7 +145,8 @@ def test_ac2_email_dispatched_on_resend() -> None:
 
     try:
         with (
-            patch("app.routes.invites.dispatch_task") as mock_dispatch,
+            patch("app.routes.invites.send_invite_email", return_value={"message_id": "<m2@airis.invite>", "provider": "brevo_smtp"}) as mock_send,
+            patch("app.routes.invites.update_invite_delivery_status") as mock_update,
             patch("app.routes.invites._now_utc", return_value=_NOW),
         ):
             with TestClient(app, raise_server_exceptions=True) as client:
@@ -154,11 +155,64 @@ def test_ac2_email_dispatched_on_resend() -> None:
         app.dependency_overrides.clear()
 
     assert resp.status_code == 200, resp.text
-    mock_dispatch.assert_called_once()
-    sent_kwargs = mock_dispatch.call_args.kwargs["kwargs"]
-    assert sent_kwargs["to_email"] == "user@example.com"
-    assert sent_kwargs["role"] == "recruiter"
-    assert "invite_id" in sent_kwargs
+    mock_send.assert_called_once()
+    send_args = mock_send.call_args.args
+    send_kwargs = mock_send.call_args.kwargs
+    assert send_args[0] == "user@example.com"
+    assert send_kwargs["role"] == "recruiter"
+    assert send_kwargs["expires_at"] == _FUTURE
+    mock_update.assert_called_once_with(
+        str(_INV_ID),
+        status="sent",
+        message_id="<m2@airis.invite>",
+        provider="brevo_smtp",
+    )
+
+
+def test_ac2_create_returns_502_when_email_send_fails() -> None:
+    """Create invite returns API error when SMTP send fails."""
+    import app.main as main_module
+    from app.core.dependencies import get_current_user
+    from app.db.session import get_db
+    from app.schemas.auth import CurrentUser
+    from fastapi.testclient import TestClient
+
+    db = MagicMock()
+    db.scalar.return_value = None
+
+    from app.models.invite import Invite as RealInvite
+
+    def _refresh(obj):
+        if isinstance(obj, RealInvite) and obj.id is None:
+            obj.id = _INV_ID
+        if isinstance(obj, RealInvite) and obj.created_at is None:
+            obj.created_at = _NOW
+
+    db.refresh = _refresh
+
+    def _admin():
+        return CurrentUser(user_id=str(_ADMIN_ID), organization_id=str(_ORG_ID), role="admin")
+
+    app = main_module.app
+    app.dependency_overrides[get_current_user] = _admin
+    app.dependency_overrides[get_db] = lambda: db
+    try:
+        with (
+            patch("app.routes.invites.send_invite_email", side_effect=RuntimeError("SMTP down")),
+            patch("app.routes.invites.update_invite_delivery_status") as mock_update,
+            patch("app.routes.invites.get_role_id_by_key", return_value=uuid4()),
+            patch("app.routes.invites._now_utc", return_value=_NOW),
+            TestClient(app, raise_server_exceptions=True) as client,
+        ):
+            resp = client.post(
+                "/api/v1/invites",
+                json={"email": "new@example.com", "role": "recruiter", "expires_in_days": 7},
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert resp.status_code == 502
+    mock_update.assert_called_once_with(str(_INV_ID), status="failed", error="SMTP down")
 
 
 # ── AC3: email contains valid link, role, expiry ──────────────────────────────

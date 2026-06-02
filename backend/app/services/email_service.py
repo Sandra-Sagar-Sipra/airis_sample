@@ -221,19 +221,30 @@ def send_invite_email(
             "message_id": message_id,
             "smtp_host": settings.smtp_host,
             "smtp_port": settings.smtp_port,
+            "smtp_from": settings.smtp_from,
         },
+    )
+    logger.info("LOG: SMTP send starting")
+    logger.info(
+        "LOG: SMTP config host=%s port=%s from=%s",
+        settings.smtp_host,
+        settings.smtp_port,
+        settings.smtp_from,
     )
 
     try:
         with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=30) as server:
             server.starttls()
             server.login(settings.smtp_user, settings.smtp_password)
+            logger.info("LOG: SMTP authenticated")
+            logger.info("LOG: Sending invite to %s", to_email)
             refused = server.send_message(msg)
 
         if refused:
             # smtplib returns refused recipients; treat as delivery failure.
             raise RuntimeError(f"SMTP refused recipients: {refused}")
 
+        logger.info("LOG: Email send successful")
         logger.info(
             "email_service.invite_sent",
             extra={"to": to_email, "message_id": message_id, "provider": DELIVERY_PROVIDER},
@@ -241,6 +252,7 @@ def send_invite_email(
         return {"message_id": message_id, "provider": DELIVERY_PROVIDER}
 
     except Exception:
+        logger.exception("LOG: Full exception traceback")
         logger.exception(
             "email_service.invite_send_failed",
             extra={"to": to_email, "message_id": message_id},
