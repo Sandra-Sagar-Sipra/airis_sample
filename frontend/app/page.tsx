@@ -1,4 +1,6 @@
-import React from 'react';
+'use client';
+
+import React, { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 
 /** Public marketing homepage — always statically generated for reliable Vercel routing. */
@@ -26,10 +28,41 @@ import {
 } from 'lucide-react';
 
 export default function LandingPage() {
+  const [isVisible, setIsVisible] = useState(true);
+  const [isScrolled, setIsScrolled] = useState(false);
+  const lastScrollY = useRef(0);
+
+  useEffect(() => {
+    const handleScroll = () => {
+      const currentScrollY = window.scrollY;
+      
+      // Add background shadow when scrolled
+      setIsScrolled(currentScrollY > 20);
+
+      // Hide navbar when scrolling down, show when scrolling up
+      if (currentScrollY > lastScrollY.current && currentScrollY > 80) {
+        setIsVisible(false);
+      } else {
+        setIsVisible(true);
+      }
+
+      lastScrollY.current = currentScrollY;
+    };
+
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    return () => {
+      window.removeEventListener('scroll', handleScroll);
+    };
+  }, []);
+
   return (
     <div className="min-h-screen bg-white text-slate-900 font-sans selection:bg-orange-100 selection:text-orange-900">
       {/* Navigation */}
-      <nav className="border-b border-gray-100 sticky top-0 bg-white/80 backdrop-blur-md z-50">
+      <nav className={`border-b border-gray-100 sticky top-0 z-50 transition-all duration-300 transform ${
+        isVisible ? 'translate-y-0' : '-translate-y-full'
+      } ${
+        isScrolled ? 'bg-white/95 shadow-sm backdrop-blur-md' : 'bg-white/80 backdrop-blur-md'
+      }`}>
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-20 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <div className="relative flex items-center justify-center w-8 h-8">
@@ -83,10 +116,6 @@ export default function LandingPage() {
         <div className="absolute top-0 left-1/2 -translate-x-1/2 w-full h-[500px] bg-[radial-gradient(ellipse_at_top,rgba(255,90,31,0.05)_0%,rgba(255,255,255,0)_70%)] pointer-events-none"></div>
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col lg:flex-row items-center justify-between gap-12 lg:gap-4">
           <div className="w-full lg:w-[45%] max-w-2xl">
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-orange-50/80 border border-orange-100 text-[#FF5A1F] text-xs font-semibold mb-6">
-              <Zap className="w-3.5 h-3.5" fill="currentColor" />
-              <span>AI-Powered Recruiting Operating System</span>
-            </div>
             <h1 className="text-5xl sm:text-6xl lg:text-[64px] font-bold tracking-tight text-[#111827] mb-8 leading-[1.05]">
               Hire faster.<br />
               Smarter.<br />

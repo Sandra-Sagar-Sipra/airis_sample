@@ -7,10 +7,22 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
+_PIPELINE_STAGE_ALIASES: dict[str, str] = {
+    # Legacy / migrated DB value -> canonical API enum value
+    "screening": "ai_interview",
+}
+
+
+def _normalize_pipeline_stage_value(value: object) -> object:
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        return _PIPELINE_STAGE_ALIASES.get(normalized, normalized)
+    return value
+
+
 class PipelineStage(StrEnum):
     APPLIED = "applied"
-    SCREENING = "screening"
-    AI_SCREENING = "ai_screening"
+    AI_INTERVIEW = "ai_interview"
     INTERVIEW = "interview"
     OFFER = "offer"
     PLACED = "placed"
@@ -46,9 +58,7 @@ class PipelineCreate(BaseModel):
     @field_validator("stage", mode="before")
     @classmethod
     def normalize_stage(cls, value: object) -> object:
-        if isinstance(value, str):
-            return value.strip().lower()
-        return value
+        return _normalize_pipeline_stage_value(value)
 
 
 class PipelineUpdate(BaseModel):
@@ -59,9 +69,7 @@ class PipelineUpdate(BaseModel):
     @field_validator("stage", mode="before")
     @classmethod
     def normalize_stage(cls, value: object) -> object:
-        if isinstance(value, str):
-            return value.strip().lower()
-        return value
+        return _normalize_pipeline_stage_value(value)
 
 
 class PipelineResponse(BaseModel):
@@ -77,7 +85,18 @@ class PipelineResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
 
+    # Denormalized job + client context — batch-loaded by the route layer.
+    # These fields are always None on single-pipeline fetches; populated on list responses.
+    job_title: str | None = None
+    client_id: UUID | None = None
+    client_name: str | None = None
+
     model_config = ConfigDict(from_attributes=True)
+
+    @field_validator("stage", mode="before")
+    @classmethod
+    def normalize_stage(cls, value: object) -> object:
+        return _normalize_pipeline_stage_value(value)
 
 
 # ── PIPE-004: Paginated list response ─────────────────────────────────────────
@@ -113,9 +132,7 @@ class PipelineStageTransitionRequest(BaseModel):
     @field_validator("stage", mode="before")
     @classmethod
     def normalize_stage(cls, value: object) -> object:
-        if isinstance(value, str):
-            return value.strip().lower()
-        return value
+        return _normalize_pipeline_stage_value(value)
 
     @model_validator(mode="after")
     def validate_rejection_reason(self) -> "PipelineStageTransitionRequest":

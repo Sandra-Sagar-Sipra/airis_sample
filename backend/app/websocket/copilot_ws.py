@@ -20,6 +20,7 @@ from datetime import UTC, datetime
 from uuid import UUID
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
+from starlette.websockets import WebSocketState
 from jose import JWTError, jwt
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -80,6 +81,25 @@ class _ConnectionManager:
             await ws.send_json(message)
         except Exception:
             pass
+
+    async def close_all(self, *, reason: str = "Server shutting down") -> None:
+        """Close every active copilot WebSocket (application shutdown)."""
+        all_conns: list[tuple[str, WebSocket]] = []
+        for interview_id, conns in list(self._connections.items()):
+            all_conns.extend((interview_id, ws) for ws in list(conns))
+        self._connections.clear()
+
+        closed = 0
+        for interview_id, ws in all_conns:
+            try:
+                if ws.client_state == WebSocketState.CONNECTED:
+                    await ws.close(code=1001, reason=reason)
+                    closed += 1
+            except Exception:
+                pass
+            logger.info("copilot_ws.registry.closed interview_id=%s", interview_id)
+        if closed:
+            logger.info("copilot_ws.registry.close_all total=%d", closed)
 
 
 manager = _ConnectionManager()

@@ -1,7 +1,7 @@
 """AIR-502: Append-only candidate_placement_history table.
 
 Revision ID: 20260521_0001
-Revises: 20260520_0002
+Revises: 20260520_0004
 Create Date: 2026-05-21
 """
 from __future__ import annotations
@@ -16,7 +16,7 @@ from sqlalchemy.dialects import postgresql
 from app.core.config import get_settings
 
 revision: str = "20260521_0001"
-down_revision: str = "20260520_0003"
+down_revision: str = "20260520_0004"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

@@ -35,17 +35,9 @@ function QueueCard({
   claiming: string | null;
 }) {
   const scheduledDate = new Date(item.scheduled_at);
-  const isUrgent = scheduledDate.getTime() - Date.now() < 24 * 60 * 60 * 1000; // < 24h
 
   return (
-    <div className={`bg-white rounded-xl border shadow-sm overflow-hidden hover:shadow-md transition-all ${
-      isUrgent ? "border-orange-200 ring-1 ring-orange-100" : "border-gray-200"
-    }`}>
-      {isUrgent && (
-        <div className="px-4 py-1.5 bg-orange-50 border-b border-orange-100 text-[10px] font-bold text-orange-600 uppercase tracking-wider">
-          Urgent — Interview within 24 hours
-        </div>
-      )}
+    <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden hover:border-[#FF5A1F]/30 transition-colors">
 
       <div className="p-4 space-y-3">
         {/* Header */}
@@ -77,7 +69,7 @@ function QueueCard({
         <div className="grid grid-cols-2 gap-2 text-xs text-gray-600">
           <div className="flex items-center gap-1.5">
             <Calendar className="w-3.5 h-3.5 text-gray-400 shrink-0" />
-            <span className={isUrgent ? "text-orange-600 font-medium" : ""}>
+            <span>
               {scheduledDate.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })}
             </span>
           </div>
@@ -90,7 +82,7 @@ function QueueCard({
             <Users className="w-3.5 h-3.5 text-gray-400 shrink-0" />
             {item.participant_count > 0
               ? `${item.participant_count} panelist${item.participant_count !== 1 ? "s" : ""}`
-              : <span className="text-amber-600 font-medium">No panelists yet</span>
+              : <span className="text-orange-600 font-medium">No panelists yet</span>
             }
           </div>
           {item.meeting_type && (
@@ -107,19 +99,19 @@ function QueueCard({
         )}
 
         {/* Actions */}
-        <div className="flex items-center gap-2 pt-1 border-t border-gray-100">
+        <div className="flex items-center justify-between pt-2.5 border-t border-gray-100">
           <Button
             size="sm"
-            className="flex-1 h-8 text-xs bg-amber-500 hover:bg-amber-600 text-white"
+            className="h-7 text-[11px] bg-[#FF5A1F] hover:bg-orange-600 text-white px-3"
             onClick={() => onClaim(item.id)}
             disabled={claiming === item.id}
           >
-            <Play className="w-3.5 h-3.5 mr-1.5" />
+            <Play className="w-3 h-3 mr-1" />
             {claiming === item.id ? "Claiming…" : "Take Interview"}
           </Button>
           <Link
             href={`/interviews/${item.id}`}
-            className="text-[11px] text-[#FF5A1F] hover:underline shrink-0 font-medium"
+            className="text-[11px] text-[#FF5A1F] hover:underline font-medium"
           >
             Workspace →
           </Link>
@@ -145,18 +137,26 @@ export default function InterviewQueuePage() {
     if (!opts?.silent) setLoading(true);
     else setRefreshing(true);
     try {
-      const [queueData, jobsData] = await Promise.all([
-        getInterviewQueue({
-          limit: 100,
-          round_type: roundFilter || undefined,
-          job_id: jobFilter || undefined,
-        }),
-        getJobs(50, 0),
-      ]);
+      // 1. Fetch queue items and immediately update state
+      const queueData = await getInterviewQueue({
+        limit: 100,
+        round_type: roundFilter || undefined,
+        job_id: jobFilter || undefined,
+      });
       setQueue(queueData);
-      setJobs(jobsData);
-    } finally {
+      
+      // 2. Stop loading spinner so UI renders instantly
       setLoading(false);
+
+      // 3. Fetch jobs in the background to populate job titles and filters
+      getJobs(50, 0)
+        .then((jobsData) => setJobs(jobsData))
+        .catch((err) => console.error("Background jobs fetch failed:", err));
+
+    } catch (err) {
+      console.error("Failed to load queue:", err);
+      setLoading(false);
+    } finally {
       setRefreshing(false);
     }
   }, [roundFilter, jobFilter]);

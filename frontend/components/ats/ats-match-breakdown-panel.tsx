@@ -3,6 +3,13 @@
 import { ATSRecommendationBadge } from "@/components/ats/ats-recommendation-badge";
 import { ATSScoreBadge } from "@/components/ats/ats-score-badge";
 
+type SkillMatchLogEntry = {
+  jd_skill: string;
+  match_type: "exact" | "synonym" | "category" | "missing";
+  candidate_skill?: string | null;
+  section?: "required" | "preferred";
+};
+
 type MatchBreakdownData = {
   fit_score?: number | null;
   deterministic_match_score?: number | null;
@@ -26,12 +33,19 @@ type MatchBreakdownData = {
     experience?: number;
     title?: number;
     education?: number;
+    // v2 categories
+    communication?: number | null;
+    culture?: number | null;
+    breadth?: number | null;
     hybrid?: {
       deterministic_score?: number;
       semantic_score?: number | null;
       final_score?: number;
       weights?: { deterministic?: number; semantic?: number };
     };
+    // v2 debug transparency
+    skill_match_log?: SkillMatchLogEntry[] | null;
+    score_explanation?: string | null;
   } | null;
   matched_skills?: string[];
   missing_skills?: string[];
@@ -172,11 +186,20 @@ export function ATSMatchBreakdownPanel({ data, title = "ATS Breakdown", isLoadin
       ) : null}
 
       <div className="grid gap-3 md:grid-cols-2">
-        <ProgressRow label="Required Skills" value={data.category_scores?.required_skills} />
-        <ProgressRow label="Preferred Skills" value={data.category_scores?.preferred_skills} />
-        <ProgressRow label="Experience" value={data.category_scores?.experience} />
-        <ProgressRow label="Title Alignment" value={data.category_scores?.title} />
-        <ProgressRow label="Education" value={data.category_scores?.education} />
+        <ProgressRow label="Required Skills (35%)" value={data.category_scores?.required_skills} />
+        <ProgressRow label="Preferred Skills (15%)" value={data.category_scores?.preferred_skills} />
+        <ProgressRow label="Experience (20%)" value={data.category_scores?.experience} />
+        <ProgressRow label="Title Alignment (10%)" value={data.category_scores?.title} />
+        <ProgressRow label="Education (5%)" value={data.category_scores?.education} />
+        {data.category_scores?.communication != null && (
+          <ProgressRow label="Communication (5%)" value={data.category_scores.communication} />
+        )}
+        {data.category_scores?.culture != null && (
+          <ProgressRow label="Culture & Practices (5%)" value={data.category_scores.culture} />
+        )}
+        {data.category_scores?.breadth != null && (
+          <ProgressRow label="Skill Breadth (5%)" value={data.category_scores.breadth} />
+        )}
       </div>
 
       <div className="mt-4 space-y-3">
@@ -213,6 +236,46 @@ export function ATSMatchBreakdownPanel({ data, title = "ATS Breakdown", isLoadin
           </div>
         ) : null}
       </div>
+
+      {/* v2 ATS Debug Transparency Panel */}
+      {(data.category_scores?.skill_match_log?.length ?? 0) > 0 && (
+        <details className="mt-4 rounded-md border border-slate-200">
+          <summary className="cursor-pointer select-none px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500 hover:bg-slate-50">
+            Skill Match Log (how each JD skill was matched)
+          </summary>
+          <div className="divide-y divide-slate-100 px-3 pb-2">
+            {data.category_scores!.skill_match_log!.map((entry, i) => (
+              <div key={i} className="flex items-center gap-2 py-1.5 text-xs">
+                <span
+                  className={`shrink-0 rounded-full border px-1.5 py-0.5 text-[10px] font-semibold ${
+                    entry.match_type === "exact"
+                      ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                      : entry.match_type === "synonym"
+                        ? "border-sky-200 bg-sky-50 text-sky-700"
+                        : entry.match_type === "category"
+                          ? "border-amber-200 bg-amber-50 text-amber-700"
+                          : "border-rose-200 bg-rose-50 text-rose-700"
+                  }`}
+                >
+                  {entry.match_type}
+                </span>
+                <span className="text-slate-700">{entry.jd_skill}</span>
+                {entry.candidate_skill && entry.candidate_skill !== entry.jd_skill && (
+                  <span className="text-slate-400">via &ldquo;{entry.candidate_skill}&rdquo;</span>
+                )}
+                <span className="ml-auto shrink-0 text-[10px] text-slate-400">
+                  {entry.section === "preferred" ? "preferred" : "required"}
+                </span>
+              </div>
+            ))}
+          </div>
+        </details>
+      )}
+      {data.category_scores?.score_explanation && (
+        <div className="mt-2 rounded-md bg-slate-50 px-3 py-2 font-mono text-[10px] text-slate-500">
+          {data.category_scores.score_explanation}
+        </div>
+      )}
 
       <div className="mt-3 flex flex-wrap gap-4 text-xs text-slate-500">
         <span>

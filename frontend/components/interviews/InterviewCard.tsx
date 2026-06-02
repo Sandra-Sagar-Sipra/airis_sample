@@ -187,7 +187,7 @@ export function InterviewCard({
         <div className="px-4 pb-3">
           <Button
             size="sm"
-            className="h-7 text-xs bg-amber-500 hover:bg-amber-600 text-white w-full"
+            className="h-7 text-xs bg-[#FF5A1F] hover:bg-orange-600 text-white w-full"
             onClick={handleClaim}
             disabled={claiming}
           >
@@ -252,7 +252,7 @@ export function InterviewCard({
                       <span className="text-gray-700 font-mono text-[10px]">{p.user_id.slice(0, 8)}…</span>
                       <span className={cn(
                         "text-[10px] px-1.5 py-0.5 rounded font-medium",
-                        p.participant_role === "lead" ? "bg-amber-100 text-amber-700" : "bg-gray-100 text-gray-600"
+                        p.participant_role === "lead" ? "bg-orange-100 text-orange-700" : "bg-gray-100 text-gray-600"
                       )}>
                         {ROLE_LABELS[p.participant_role] ?? p.participant_role}
                       </span>

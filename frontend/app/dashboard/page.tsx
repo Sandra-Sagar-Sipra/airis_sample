@@ -121,9 +121,8 @@ export default function DashboardPage() {
             <div className="absolute top-[2.3rem] left-16 right-16 h-[1px] border-b border-dashed border-orange-200 z-0" />
             <div className="flex items-center justify-between relative z-10 w-full px-4">
               <PipelineStage title="Sourced"    value={data?.pipeline_stages.sourced}     loading={loading} />
-              <PipelineStage title="Screening"  value={data?.pipeline_stages.screening}   loading={loading} />
+              <PipelineStage title="AI Interview"  value={data?.pipeline_stages.ai_interview}   loading={loading} />
               <PipelineStage title="Interview"  value={data?.pipeline_stages.interview}   loading={loading} highlight />
-              <PipelineStage title="Assessment" value={data?.pipeline_stages.assessment}  loading={loading} highlight />
               <PipelineStage title="Offer"      value={data?.pipeline_stages.offer}       loading={loading} />
               <PipelineStage title="Placed"     value={data?.pipeline_stages.placed}      loading={loading} isSuccess />
             </div>

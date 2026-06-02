@@ -1,7 +1,6 @@
 from collections.abc import Generator
-from urllib.parse import urlparse
-
-from sqlalchemy import create_engine, event
+from contextlib import contextmanager
+from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import NullPool
 
@@ -11,41 +10,34 @@ settings = get_settings()
 
 # ── pgBouncer / Supabase compatibility ────────────────────────────────────────
 #
-# Supabase transaction-mode pooler (port 6543) multiplexes many app connections
-# over a small set of real Postgres connections.  Two SQLAlchemy settings are
-# required to avoid hard-to-debug 500s:
+# Supabase pooler (pooler.supabase.com) multiplexes many app connections over a
+# small set of real Postgres connections. SQLAlchemy must NOT maintain its own
+# connection pool on top of the pooler — that exhausts checkout slots and causes:
+#   ECHECKOUTTIMEOUT unable to check out connection from the pool after 60000ms
 #
-# 1. NullPool — SQLAlchemy must NOT maintain its own connection pool on top of
-#    pgBouncer.  Without this, the pool holds connections open between requests,
-#    exhausting the pooler's 15-client session-mode cap instantly.  With NullPool,
-#    each request gets a fresh socket to pgBouncer and releases it immediately.
+# Use NullPool for all Supabase pooler URLs (ports 5432 session mode and 6543
+# transaction mode). Each request opens a connection and releases it immediately.
 #
-# 2. prepare_threshold=None — psycopg v3 auto-prepares frequently-used SQL
-#    statements on the Postgres connection.  In transaction mode, pgBouncer
-#    reuses the same underlying Postgres connection across different app sessions.
-#    If psycopg tries to prepare "_pg3_0" on a connection that already has it
-#    (from a previous app session), Postgres raises DuplicatePreparedStatement
-#    → 500.  Setting prepare_threshold=None disables server-side prepared
-#    statements entirely; psycopg sends all queries as simple protocol instead.
-#
-# Both settings are applied only when the URL targets the Supabase pooler.
-# For local Postgres the defaults work fine.
+# prepare_threshold=None disables psycopg v3 server-side prepared statements, which
+# break when the pooler reuses underlying connections across clients.
 
 _db_url = settings.database_url or ""
-_parsed_db = urlparse(_db_url)
-# Transaction-mode pooler (:6543) requires NullPool + no prepared statements.
-# Session-mode pooler (:5432) can use a small app-side pool (much faster per request).
-_use_transaction_pooler = (
-    "pooler.supabase.com" in _db_url and _parsed_db.port == 6543
-)
+if _db_url.startswith("postgresql://") and "+psycopg" not in _db_url.split("://", 1)[0]:
+    _db_url = _db_url.replace("postgresql://", "postgresql+psycopg://", 1)
+
+_use_supabase_pooler = "pooler.supabase.com" in _db_url
 
 _engine_kwargs: dict = {
     "future": True,
     "hide_parameters": True,
 }
 
-if _use_transaction_pooler:
+if _use_supabase_pooler:
+    # NullPool: every request opens and immediately closes its own connection.
+    # No SQLAlchemy connection pool on top of pgBouncer — avoids slot exhaustion.
     _engine_kwargs["poolclass"] = NullPool
+    # prepare_threshold=None disables psycopg server-side prepared statements.
+    # Required for pgBouncer transaction mode; harmless for session mode.
     _engine_kwargs["connect_args"] = {"prepare_threshold": None}
 else:
     _engine_kwargs["pool_pre_ping"] = True
@@ -68,7 +60,22 @@ def get_db() -> Generator[Session, None, None]:
     try:
         yield db
     except BaseException:
-        # Prevent poisoned sessions from leaking pending rollback state to the pool.
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        raise
+    finally:
+        db.close()
+
+
+@contextmanager
+def db_session() -> Generator[Session, None, None]:
+    """Short-lived session for WebSockets and background work (always closes)."""
+    db = SessionLocal()
+    try:
+        yield db
+    except BaseException:
         try:
             db.rollback()
         except Exception:

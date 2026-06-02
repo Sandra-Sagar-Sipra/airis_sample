@@ -31,8 +31,7 @@ logger = logging.getLogger(__name__)
 # Canonical forward-progression funnel stages (terminal stages excluded from funnel steps).
 FUNNEL_STAGES: list[str] = [
     "applied",
-    "screening",
-    "ai_screening",
+    "ai_interview",
     "interview",
     "offer",
     "placed",
@@ -40,8 +39,7 @@ FUNNEL_STAGES: list[str] = [
 
 STAGE_LABELS: dict[str, str] = {
     "applied": "Applied",
-    "screening": "Screening",
-    "ai_screening": "AI Screening",
+    "ai_interview": "AI Interview",
     "interview": "Interview",
     "offer": "Offer",
     "placed": "Placed",
@@ -50,9 +48,8 @@ STAGE_LABELS: dict[str, str] = {
 
 # "Next" stage for each forward stage (used for conversion rate computation).
 NEXT_STAGE: dict[str, str] = {
-    "applied": "screening",
-    "screening": "interview",
-    "ai_screening": "interview",
+    "applied": "ai_interview",
+    "ai_interview": "interview",
     "interview": "offer",
     "offer": "placed",
 }
@@ -428,22 +425,13 @@ class PipelineAnalyticsService:
                     exited_rejected += cnt
                 elif next_stage and nxt == next_stage:
                     exited_forward += cnt
-                # Skip other transitions (ai_screening branches, etc.)
-
-            # For ai_screening, "next" can be interview (same as screening→interview)
-            if stage == "ai_screening":
-                exited_forward = transition_matrix.get(("ai_screening", "interview"), 0)
-                exited_rejected = transition_matrix.get(("ai_screening", "rejected"), 0)
+                # Skip other transitions.
 
             still_in_stage = current_distribution.get(stage, 0)
 
             # "entered" = those still here + those who advanced + those rejected from here
             # Exception: "applied" also includes pipelines that never had a history entry
             entered = still_in_stage + exited_forward + exited_rejected
-
-            # ai_screening is an optional branch; skip if no data
-            if stage == "ai_screening" and entered == 0:
-                continue
 
             conversion_rate = (exited_forward / entered * 100) if entered > 0 else 0.0
             rejection_rate = (exited_rejected / entered * 100) if entered > 0 else 0.0

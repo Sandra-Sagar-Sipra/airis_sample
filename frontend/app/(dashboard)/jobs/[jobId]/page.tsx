@@ -6,6 +6,7 @@ import { useParams, useRouter } from "next/navigation";
 import { Card, CardContent } from "@/components/ui/card";
 import { ApiError } from "@/lib/api/client";
 import { getJobById, getJobCandidates, getJobSubmissions, updateJob, deleteJob, changeJobStatus } from "@/lib/api/jobs";
+import { listAllClients } from "@/lib/api/clients";
 import { getPipelines } from "@/lib/api/pipeline";
 import {
   atsAwaitingSemanticEnrichment,
@@ -14,7 +15,7 @@ import {
   pollJobMatchesUntilEnriched,
   rescoreJobAts,
 } from "@/lib/api/ats";
-import type { Job, JobCandidateListItem, JobMatchEntry, JobSubmission, JobStatus, Pipeline } from "@/lib/api/types";
+import type { Client, Job, JobCandidateListItem, JobMatchEntry, JobSubmission, JobStatus, Pipeline } from "@/lib/api/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ATSRecommendationBadge } from "@/components/ats/ats-recommendation-badge";
@@ -195,6 +196,15 @@ export default function JobDetailPage() {
   const [editExpMax, setEditExpMax] = useState("");
   const [editEmploymentType, setEditEmploymentType] = useState("");
   const [editKeyResponsibilities, setEditKeyResponsibilities] = useState("");
+  const [editClientId, setEditClientId] = useState<string>("");
+  const [clients, setClients] = useState<Client[]>([]);
+
+  // Fetch clients once for the edit selector
+  useEffect(() => {
+    void listAllClients()
+      .then((all) => setClients(all.filter((c) => !c.is_deleted)))
+      .catch(() => {});
+  }, []);
 
   function openEditPanel() {
     if (!job) return;
@@ -208,6 +218,7 @@ export default function JobDetailPage() {
     setEditExpMax(job.experience_max_years?.toString() || "");
     setEditEmploymentType(job.employment_type || "");
     setEditKeyResponsibilities(job.key_responsibilities?.join("\n") || "");
+    setEditClientId(job.client_id || "");
     setShowEdit(true);
   }
 
@@ -215,16 +226,17 @@ export default function JobDetailPage() {
     setError(null);
     if (!editTitle.trim()) { setError("Job title is required."); return; }
     if (!jobIdParam) return;
-    
+
     try {
       setUpdating(true);
       const req = editRequiredSkills.split(/[\n,]+/g).map((s) => s.trim()).filter(Boolean);
       const pref = editPreferredSkills.split(/[\n,]+/g).map((s) => s.trim()).filter(Boolean);
       const keyResp = editKeyResponsibilities.split(/[\n]+/g).map((s) => s.trim()).filter(Boolean);
-      
+
       await updateJob(jobIdParam, {
+        ...(editClientId.trim() ? { client_id: editClientId.trim() } : {}),
         title: editTitle.trim(),
-        description: editDescription.trim() || null, 
+        description: editDescription.trim() || null,
         location: editLocation.trim() || null,
         experience_min_years: editExpMin ? Number(editExpMin) : null,
         experience_max_years: editExpMax ? Number(editExpMax) : null,
@@ -233,13 +245,13 @@ export default function JobDetailPage() {
         preferred_skills: pref.length ? pref : null,
         key_responsibilities: keyResp.length ? keyResp : null,
       });
-      
+
       setShowEdit(false);
       void loadData({ silent: true }); // reload job without full-page skeleton
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Unable to update job.");
-    } finally { 
-      setUpdating(false); 
+    } finally {
+      setUpdating(false);
     }
   }
 
@@ -581,7 +593,7 @@ export default function JobDetailPage() {
   const pipelineSummary = {
     total: pipelines.length,
     applied: pipelines.filter((item) => item.stage === "applied").length,
-    screening: pipelines.filter((item) => item.stage === "screening").length,
+    aiInterview: pipelines.filter((item) => item.stage === "ai_interview").length,
     interview: pipelines.filter((item) => item.stage === "interview").length,
     offered: pipelines.filter((item) => item.stage === "offer").length,
     hired: pipelines.filter((item) => item.stage === "placed").length,
@@ -598,6 +610,11 @@ export default function JobDetailPage() {
         </button>
         <div className="flex items-center justify-between">
           <div className="flex flex-col gap-1">
+            {job.client_name && (
+              <p className="text-xs font-semibold text-orange-500 uppercase tracking-wide">
+                {job.client_name}
+              </p>
+            )}
             <div className="flex items-center gap-3">
               <h1 className="text-2xl font-bold text-gray-900 tracking-tight">
                 {job.title}
@@ -961,6 +978,23 @@ export default function JobDetailPage() {
             {/* Scrollable Content */}
             <div className="flex-1 overflow-y-auto p-6 space-y-6 text-sm">
               <div className="space-y-4">
+                {clients.length > 0 && (
+                  <div>
+                    <label className="block text-xs font-medium text-slate-500 mb-1">Client</label>
+                    <select
+                      className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm bg-white focus:border-[#FF5A1F] focus:ring-1 focus:ring-[#FF5A1F]/30 focus:outline-none"
+                      value={editClientId}
+                      onChange={(e) => setEditClientId(e.target.value)}
+                    >
+                      <option value="">— No change —</option>
+                      {clients.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
                 <div>
                   <label className="block text-xs font-medium text-slate-500 mb-1">Title *</label>
                   <Input placeholder="Software Engineer" value={editTitle} onChange={(e) => setEditTitle(e.target.value)} />

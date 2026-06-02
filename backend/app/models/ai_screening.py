@@ -1,4 +1,4 @@
-"""SQLAlchemy ORM models for the AI Screening layer.
+"""SQLAlchemy ORM models for the AI Screening layer (async + live interview).
 
 Four tables form the core entity graph:
   ai_screenings              — one screening session per candidate×job pairing
@@ -12,7 +12,7 @@ from datetime import datetime
 from uuid import UUID
 
 import sqlalchemy as sa
-from sqlalchemy import DateTime, ForeignKey, Integer, Numeric, String, Text, func
+from sqlalchemy import DateTime, ForeignKey, Integer, Numeric, String, Text, Boolean, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -45,6 +45,13 @@ class AIScreening(Base):
         nullable=True,
         index=True,
     )
+    # Link to the pipeline entry that triggered this screening
+    pipeline_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("pipelines.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     created_by: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True), nullable=True)
 
     # Lifecycle ---------------------------------------------------------------
@@ -59,6 +66,10 @@ class AIScreening(Base):
         String(32), nullable=False, server_default="technical"
     )
     ai_model: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+    # Incomplete reason (set when interview did not meet scoring thresholds) ----
+    # status = "incomplete" when this is populated
+    incomplete_reason: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
     # Aggregate AI scores (0–100) populated after evaluation ------------------
     overall_score: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
@@ -83,6 +94,34 @@ class AIScreening(Base):
     # AI usage tracking -------------------------------------------------------
     prompt_tokens_used: Mapped[int | None] = mapped_column(Integer, nullable=True)
     completion_tokens_used: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    # Live-interview mode -----------------------------------------------------
+    # 'async' (default recruiter-enters-answers flow) | 'live' (video interview)
+    interview_mode: Mapped[str] = mapped_column(
+        String(32), nullable=False, server_default=sa.text("'async'")
+    )
+    # Candidate join token (live mode only)
+    session_token: Mapped[str | None] = mapped_column(String(255), nullable=True, unique=True)
+    livekit_room_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    candidate_name_snapshot: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    job_title_snapshot: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+    # Live interview timing ---------------------------------------------------
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    duration_seconds: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)
+
+    # Additional scores for live interview evaluation -------------------------
+    experience_score: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
+    culture_fit_score: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
+
+    # Structured findings (live interview) ------------------------------------
+    strengths: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    concerns: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    key_projects_mentioned: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    salary_expectation: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    notice_period: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    career_goals: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Timestamps --------------------------------------------------------------
     created_at: Mapped[datetime] = mapped_column(
@@ -222,4 +261,39 @@ class AIScreeningEvaluation(Base):
         nullable=False,
         server_default=func.now(),
         onupdate=sa.text("now()"),
+    )
+
+
+class AIScreeningMessage(Base):
+    """Single conversation turn in a live AI screening interview.
+
+    role: 'interviewer' (AI question) | 'candidate' (transcribed answer) | 'system'
+    """
+
+    __tablename__ = "ai_screening_messages"
+
+    id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        primary_key=True,
+        server_default=sa.text("gen_random_uuid()"),
+    )
+    screening_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("ai_screenings.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    role: Mapped[str] = mapped_column(String(32), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+
+    sequence_number: Mapped[int] = mapped_column(Integer, nullable=False, server_default=sa.text("0"))
+    question_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    is_followup: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=sa.text("false"))
+
+    raw_transcript: Mapped[str | None] = mapped_column(Text, nullable=True)
+    transcript_confidence: Mapped[float | None] = mapped_column(Numeric(4, 3), nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
     )

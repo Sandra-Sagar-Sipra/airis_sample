@@ -150,6 +150,24 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("AI_PARSE_ENABLE_BACKUP", "ai_parse_enable_backup"),
     )
 
+    # Groq API key for AI Screening Interview (live conversational interviews).
+    groq_api_key_aiinterview: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("GROQ_API_KEY_AIinterview", "groq_api_key_aiinterview"),
+    )
+    groq_aiinterview_model: str = Field(
+        default="llama-3.3-70b-versatile",
+        validation_alias=AliasChoices("GROQ_AIINTERVIEW_MODEL", "groq_aiinterview_model"),
+    )
+    groq_aiinterview_api_base: str = Field(
+        default="https://api.groq.com/openai/v1",
+        validation_alias=AliasChoices("GROQ_AIINTERVIEW_API_BASE", "groq_aiinterview_api_base"),
+    )
+    groq_aiinterview_timeout_seconds: float = Field(
+        default=30.0,
+        validation_alias=AliasChoices("GROQ_AIINTERVIEW_TIMEOUT_SECONDS", "groq_aiinterview_timeout_seconds"),
+    )
+
     # Groq API key for ATS semantic enrichment (OpenAI-compatible API).
     groq_ats_api_key: str | None = Field(
         default=None,
@@ -327,18 +345,14 @@ class Settings(BaseSettings):
                     1,
                 )
 
-            # Supabase session-mode pooler (port 5432) caps at 15 concurrent
-            # connections — SQLAlchemy's own pool exhausts that quota instantly.
-            # Automatically switch to transaction-mode pooler (port 6543) so
-            # pgBouncer multiplexes many clients over a small set of real PG
-            # connections.  NullPool is set in db/session.py when this rewrite
-            # fires, so SQLAlchemy never holds connections between requests.
-            if "pooler.supabase.com:5432" in self.database_url:
-                self.database_url = self.database_url.replace(
-                    "pooler.supabase.com:5432",
-                    "pooler.supabase.com:6543",
-                    1,
-                )
+            # Session-mode pooler (port 5432) + NullPool is the correct setup.
+            # NullPool (set in db/session.py for all Supabase URLs) opens and
+            # immediately closes every connection, so pgBouncer's session-mode
+            # accounting stays accurate and transaction-mode is not needed.
+            # We deliberately do NOT rewrite 5432→6543: the transaction-mode pool
+            # (6543) saturates under modest concurrent load because pgBouncer
+            # queues waiting clients rather than refusing them, leading to 60-second
+            # ECHECKOUTTIMEOUT errors on all endpoints.
 
             return self
 

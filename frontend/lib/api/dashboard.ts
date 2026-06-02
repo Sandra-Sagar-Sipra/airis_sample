@@ -2,9 +2,8 @@ import { apiRequest } from "@/lib/api/client";
 
 export type DashboardPipelineStages = {
   sourced: number;
-  screening: number;
+  ai_interview: number;
   interview: number;
-  assessment: number;
   offer: number;
   placed: number;
 };

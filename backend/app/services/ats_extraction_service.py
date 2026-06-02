@@ -43,22 +43,70 @@ BASELINE_SKILLS: tuple[str, ...] = (
     "fastapi", "django", "flask", "spring", "spring boot", "node.js", "node",
     "express", "nestjs", "next.js", "nextjs", "react", "react native",
     "angular", "vue", "vue.js", "svelte", "rails", "laravel", "redux",
+    "redux toolkit", "remix", "gatsby", "nuxt",
     # Data / DB
     "postgresql", "postgres", "mysql", "mariadb", "sqlite", "mongodb",
     "redis", "elasticsearch", "cassandra", "dynamodb", "bigquery", "snowflake",
     "sql", "nosql", "kafka", "rabbitmq",
+    "prisma", "drizzle", "typeorm", "sequelize",
     # Cloud / infra
     "aws", "gcp", "azure", "docker", "kubernetes", "k8s", "terraform",
     "ansible", "jenkins", "github actions", "gitlab ci", "circleci",
-    "cloudflare", "supabase", "firebase",
+    "cloudflare", "supabase", "firebase", "vercel", "netlify",
     # Data science / ML
     "pandas", "numpy", "scikit-learn", "sklearn", "tensorflow", "pytorch",
     "keras", "spark", "hadoop", "airflow", "dbt", "tableau", "power bi",
-    # Other tooling
-    "git", "linux", "bash", "graphql", "rest", "grpc", "openapi",
-    "celery", "rabbitmq", "nginx", "prometheus", "grafana", "datadog",
-    # Methodologies / collaboration (often listed as skills)
+    # Testing frameworks — JS
+    "jest", "vitest", "mocha", "jasmine", "chai",
+    "react testing library", "testing library", "enzyme",
+    # Testing frameworks — E2E / integration
+    "playwright", "cypress", "selenium", "puppeteer",
+    "storybook", "chromatic",
+    # Testing concepts
+    "unit testing", "integration testing", "e2e testing", "tdd",
+    "test-driven development", "test coverage",
+    # Web accessibility
+    "wcag", "aria", "a11y", "web accessibility", "accessibility",
+    "section 508", "wai-aria", "accessibility compliance",
+    # CSS tooling & frameworks
+    "tailwind", "tailwindcss", "tailwind css",
+    "styled-components", "emotion", "css-in-js",
+    "material-ui", "mui", "chakra ui", "shadcn", "radix ui",
+    "bootstrap", "foundation",
+    "sass", "scss", "less",
+    # HTML / CSS fundamentals (resume-listed)
+    "html", "html5", "css", "css3", "svg",
+    # Responsive / mobile
+    "responsive design", "responsive web design", "mobile-first",
+    "adaptive design", "cross-browser compatibility",
+    # Build tools / bundlers
+    "webpack", "vite", "rollup", "parcel", "esbuild", "turbopack", "babel",
+    # Code quality tools
+    "eslint", "prettier", "biome", "sonarqube",
+    # State management
+    "zustand", "mobx", "recoil", "jotai", "xstate", "context api",
+    # React ecosystem
+    "react router", "react hook form", "react query", "swr",
+    "tanstack query", "tanstack", "framer motion", "axios",
+    # Schema / validation
+    "zod", "yup", "joi",
+    # Design tools
+    "figma", "sketch", "adobe xd", "invision", "zeplin",
+    # Version control & collaboration
+    "git", "github", "gitlab", "bitbucket",
+    # API / protocol
+    "graphql", "rest", "grpc", "openapi", "trpc", "websockets",
+    # Other tooling / observability
+    "linux", "bash", "nginx", "prometheus", "grafana", "datadog",
+    "celery", "opentelemetry",
+    # Methodologies / soft-skill indicators
     "agile", "scrum", "kanban", "jira", "confluence",
+    "code review", "pair programming",
+    "mentoring", "mentorship", "coaching",
+    "technical writing", "documentation",
+    "cross-functional", "stakeholder management",
+    # Monorepo / packaging
+    "turborepo", "nx", "lerna", "pnpm", "yarn",
     "sql server", "opentelemetry",
 )
 
@@ -107,13 +155,16 @@ class ExtractedCandidateProfile:
 # Rule-based ecosystem tags for recruiter insights + semantic ATS payloads.
 _ECOSYSTEM_TRIGGERS: tuple[tuple[frozenset[str], str], ...] = (
     (frozenset({"nestjs", "express", "node.js", "javascript", "typescript"}), "node-ecosystem"),
-    (frozenset({"react", "next.js", "redux", "angular", "vue"}), "frontend-modern"),
+    (frozenset({"react", "next.js", "redux", "angular", "vue", "svelte"}), "frontend-modern"),
     (frozenset({"kafka", "rabbitmq", "activemq"}), "event-driven"),
     (frozenset({"terraform", "ansible", "pulumi"}), "infrastructure-as-code"),
     (frozenset({"docker", "kubernetes", "k8s"}), "containers-orchestration"),
     (frozenset({"prometheus", "grafana", "datadog", "opentelemetry"}), "observability"),
     (frozenset({"postgresql", "mysql", "mongodb", "redis", "cassandra", "dynamodb"}), "data-stores"),
     (frozenset({"aws", "azure", "google cloud", "gcp"}), "cloud-platforms"),
+    (frozenset({"jest", "vitest", "cypress", "playwright", "react testing library"}), "testing-practices"),
+    (frozenset({"wcag", "aria", "web accessibility", "a11y"}), "accessibility-first"),
+    (frozenset({"tailwind", "styled-components", "material-ui", "sass"}), "modern-css"),
 )
 
 

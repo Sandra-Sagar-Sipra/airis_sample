@@ -4,8 +4,7 @@ import { apiRequest } from "@/lib/api/client";
 export type PlacementOutcome =
   | "pending"
   | "applied"
-  | "screening"
-  | "ai_screening"
+  | "ai_interview"
   | "interview"
   | "offer"
   | "placed"

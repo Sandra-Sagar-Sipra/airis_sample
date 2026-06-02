@@ -33,9 +33,8 @@ logger = logging.getLogger(__name__)
 # ── PIPE-002: Valid stage transitions ─────────────────────────────────────────
 # Terminal stages (placed, rejected) have no outgoing transitions.
 VALID_TRANSITIONS: dict[str, frozenset[str]] = {
-    PipelineStage.APPLIED.value:      frozenset({PipelineStage.SCREENING.value, PipelineStage.REJECTED.value}),
-    PipelineStage.SCREENING.value:    frozenset({PipelineStage.INTERVIEW.value, PipelineStage.REJECTED.value}),
-    PipelineStage.AI_SCREENING.value: frozenset({PipelineStage.INTERVIEW.value, PipelineStage.REJECTED.value}),
+    PipelineStage.APPLIED.value:      frozenset({PipelineStage.AI_INTERVIEW.value, PipelineStage.REJECTED.value}),
+    PipelineStage.AI_INTERVIEW.value: frozenset({PipelineStage.INTERVIEW.value, PipelineStage.REJECTED.value}),
     PipelineStage.INTERVIEW.value:    frozenset({PipelineStage.OFFER.value, PipelineStage.REJECTED.value}),
     PipelineStage.OFFER.value:        frozenset({PipelineStage.PLACED.value, PipelineStage.REJECTED.value}),
     PipelineStage.PLACED.value:       frozenset(),
@@ -114,15 +113,23 @@ class PipelineService:
         *,
         job_id: UUID | None = None,
         candidate_id: UUID | None = None,
+        client_id: UUID | None = None,
         stage: PipelineStage | None = None,
         pipeline_status: PipelineStatus | None = None,
     ) -> Select:
-        """Return a base SELECT statement with all org-scope and filter predicates applied."""
+        """Return a base SELECT statement with all org-scope and filter predicates applied.
+
+        client_id filter: joins to the jobs table and filters by jobs.client_id.
+        This is additive with job_id (both can be specified simultaneously).
+        """
         stmt: Select = select(Pipeline).where(Pipeline.organization_id == organization_id)
         if job_id is not None:
             stmt = stmt.where(Pipeline.job_id == job_id)
         if candidate_id is not None:
             stmt = stmt.where(Pipeline.candidate_id == candidate_id)
+        if client_id is not None:
+            # Join to jobs to filter by client_id — no explicit FK on Pipeline.
+            stmt = stmt.join(Job, Job.id == Pipeline.job_id).where(Job.client_id == client_id)
         if stage is not None:
             stmt = stmt.where(Pipeline.stage == stage.value)
         if pipeline_status is not None:
@@ -140,6 +147,7 @@ class PipelineService:
         offset: int = 0,
         job_id: UUID | None = None,
         candidate_id: UUID | None = None,
+        client_id: UUID | None = None,
         stage: PipelineStage | None = None,
         pipeline_status: PipelineStatus | None = None,
         sort_by: PipelineSortBy = PipelineSortBy.CREATED_AT,
@@ -150,6 +158,7 @@ class PipelineService:
             current_user,
             job_id=job_id,
             candidate_id=candidate_id,
+            client_id=client_id,
             stage=stage,
             pipeline_status=pipeline_status,
         )
@@ -177,18 +186,18 @@ class PipelineService:
         offset: int = 0,
         job_id: UUID | None = None,
         candidate_id: UUID | None = None,
+        client_id: UUID | None = None,
         stage: PipelineStage | None = None,
         pipeline_status: PipelineStatus | None = None,
         sort_by: PipelineSortBy = PipelineSortBy.CREATED_AT,
         sort_dir: PipelineSortDir = PipelineSortDir.DESC,
     ) -> tuple[list[Pipeline], int, dict[str, int]]:
-        """
-        PIPE-004: Return (pipelines, total_count, stage_counts).
+        """PIPE-004: Return (pipelines, total_count, stage_counts).
 
-        - `total_count` is the full count matching all filters (before pagination).
-        - `stage_counts` is a per-stage breakdown across ALL filters EXCEPT the
+        - ``total_count`` is the full count matching all filters (before pagination).
+        - ``stage_counts`` is a per-stage breakdown across ALL filters EXCEPT the
           stage filter itself, giving callers visibility into the full distribution.
-          Both queries run as single SQL statements — no N+1.
+        - ``client_id`` filters pipelines whose linked job belongs to that client.
         """
         # ── 1. Filtered page ──────────────────────────────────────────────────
         paginated_stmt = self._build_pipeline_filter_stmt(
@@ -196,6 +205,7 @@ class PipelineService:
             current_user,
             job_id=job_id,
             candidate_id=candidate_id,
+            client_id=client_id,
             stage=stage,
             pipeline_status=pipeline_status,
         )
@@ -211,6 +221,7 @@ class PipelineService:
             current_user,
             job_id=job_id,
             candidate_id=candidate_id,
+            client_id=client_id,
             stage=stage,
             pipeline_status=pipeline_status,
         )
@@ -224,6 +235,7 @@ class PipelineService:
             current_user,
             job_id=job_id,
             candidate_id=candidate_id,
+            client_id=client_id,
             stage=None,            # intentionally omit stage filter
             pipeline_status=pipeline_status,
         )
@@ -454,6 +466,25 @@ class PipelineService:
             new_stage,
             current_user.user_id,
         )
+
+        # ── AI Interview: auto-create when candidate enters AI interview stage ──
+        if new_stage == PipelineStage.AI_INTERVIEW.value:
+            try:
+                from app.services.ai_screening_service import AIScreeningService
+                AIScreeningService(self.db).auto_create_for_pipeline(
+                    org_id=organization_id,
+                    candidate_id=pipeline.candidate_id,
+                    job_id=pipeline.job_id,
+                    pipeline_id=pipeline.id,
+                    created_by=UUID(current_user.user_id) if current_user.user_id else None,
+                )
+            except Exception:
+                logger.warning(
+                    "pipeline.ai_interview_auto_create.failed pipeline_id=%s — suppressed",
+                    pipeline_id,
+                    exc_info=True,
+                )
+
         return pipeline
 
     def get_stage_history(

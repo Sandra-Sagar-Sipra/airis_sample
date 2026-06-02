@@ -76,7 +76,7 @@ export function StartScreeningModal({
       });
       onStarted(screening.id);
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Failed to start screening.";
+      const msg = err instanceof Error ? err.message : "Failed to start AI interview.";
       setError(msg);
       setLoading(false);
     }
@@ -92,7 +92,7 @@ export function StartScreeningModal({
               <Brain className="h-4.5 w-4.5 text-orange-500" />
             </div>
             <div>
-              <h2 className="text-base font-bold text-slate-900">Start AI Screening</h2>
+              <h2 className="text-base font-bold text-slate-900">Start AI Interview</h2>
               <p className="text-xs text-slate-500 mt-0.5">
                 {candidateName}
                 {jobTitle ? ` · ${jobTitle}` : ""}
@@ -149,7 +149,7 @@ export function StartScreeningModal({
             <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
               <div>
                 <p className="text-sm font-medium text-slate-700">
-                  Move to AI Screening stage
+                  Move to AI Interview stage
                 </p>
                 <p className="text-xs text-slate-400 mt-0.5">
                   Automatically updates the pipeline board column
@@ -203,7 +203,7 @@ export function StartScreeningModal({
             ) : (
               <>
                 <Zap className="h-3.5 w-3.5" />
-                Start Screening
+                Start AI Interview
               </>
             )}
           </Button>

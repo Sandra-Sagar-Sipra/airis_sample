@@ -15,7 +15,7 @@ const ROLE_OPTIONS: { value: ParticipantRole; label: string }[] = [
 ];
 
 const ROLE_STYLE: Record<string, string> = {
-  lead:           "bg-amber-100 text-amber-700",
+  lead:           "bg-orange-100 text-orange-700",
   panel:          "bg-blue-100 text-blue-700",
   observer:       "bg-gray-100 text-gray-600",
   hiring_manager: "bg-purple-100 text-purple-700",

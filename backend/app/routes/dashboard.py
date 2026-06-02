@@ -37,9 +37,8 @@ router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
 class PipelineStages(BaseModel):
     sourced: int = 0
-    screening: int = 0
+    ai_interview: int = 0
     interview: int = 0
-    assessment: int = 0
     offer: int = 0
     placed: int = 0
 
@@ -292,9 +291,8 @@ def get_dashboard_summary(
 
         pipeline_stages = PipelineStages(
             sourced=_active("applied"),
-            screening=_active("screening"),
+            ai_interview=_active("ai_interview"),
             interview=_active("interview"),
-            assessment=_active("assessment"),
             offer=_active("offer"),
             placed=sum(v for (s, _), v in stage_map.items() if s == "placed"),
         )

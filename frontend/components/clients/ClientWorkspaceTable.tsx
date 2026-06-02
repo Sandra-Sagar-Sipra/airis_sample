@@ -8,9 +8,11 @@ type Props = {
   clients: Client[];
   onArchive?: (client: Client) => void;
   canDelete?: boolean;
+  /** Whether the current user can assign / remove recruiters from a client. */
+  canAssign?: boolean;
 };
 
-export function ClientWorkspaceTable({ clients, onArchive, canDelete }: Props) {
+export function ClientWorkspaceTable({ clients, onArchive, canDelete, canAssign }: Props) {
   if (clients.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-gray-200 py-16 text-center">
@@ -29,7 +31,7 @@ export function ClientWorkspaceTable({ clients, onArchive, canDelete }: Props) {
             <th className="px-4 py-3 text-left font-semibold text-gray-600">Client</th>
             <th className="px-4 py-3 text-left font-semibold text-gray-600">Industry</th>
             <th className="px-4 py-3 text-left font-semibold text-gray-600">Contact Email</th>
-            <th className="px-4 py-3 text-left font-semibold text-gray-600">Recruiters</th>
+            <th className="px-4 py-3 text-left font-semibold text-gray-600">Recruiters Assigned</th>
             <th className="px-4 py-3 text-left font-semibold text-gray-600">Status</th>
             {canDelete && <th className="px-4 py-3" />}
           </tr>
@@ -72,6 +74,14 @@ export function ClientWorkspaceTable({ clients, onArchive, canDelete }: Props) {
                 <span className="inline-flex items-center gap-1 text-gray-600">
                   <Users className="h-3 w-3 text-gray-400" />
                   {client.assigned_recruiter_ids?.length ?? 0}
+                  {canAssign && (
+                    <Link
+                      href={`/clients/${client.id}`}
+                      className="ml-1 text-xs text-[#FF5A1F] hover:underline"
+                    >
+                      Manage
+                    </Link>
+                  )}
                 </span>
               </td>
               <td className="px-4 py-3">

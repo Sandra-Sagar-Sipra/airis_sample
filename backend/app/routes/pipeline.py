@@ -4,12 +4,15 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.core.dependencies import get_current_user, require_permission
 from app.core.permissions import ORGANIZATION_MANAGE, PIPELINE_CREATE, PIPELINE_READ, PIPELINE_UPDATE
 from app.db.session import get_db
+from app.models.client import Client
+from app.models.job import Job
 from app.schemas.auth import CurrentUser
 from app.schemas.pipeline import (
     PipelineCreate,
@@ -58,18 +61,20 @@ def list_pipelines(
     offset: Annotated[int, Query(ge=0)] = 0,
     job_id: Annotated[UUID | None, Query()] = None,
     candidate_id: Annotated[UUID | None, Query()] = None,
+    client_id: Annotated[UUID | None, Query(description="Filter pipelines by client workspace")] = None,
     stage: Annotated[PipelineStage | None, Query()] = None,
     pipeline_status: Annotated[PipelineStatus | None, Query(alias="status")] = None,
     sort_by: Annotated[PipelineSortBy, Query()] = PipelineSortBy.CREATED_AT,
     sort_dir: Annotated[PipelineSortDir, Query()] = PipelineSortDir.DESC,
 ) -> PipelineListResponse:
-    """
-    GET /api/v1/pipelines — PIPE-004
+    """GET /api/v1/pipelines — PIPE-004.
 
-    Supports filtering by job_id, candidate_id, stage, and status.
+    Supports filtering by job_id, candidate_id, client_id, stage, and status.
+    ``client_id`` returns only pipelines whose linked job belongs to that client
+    workspace — enabling per-client pipeline views for both admins and recruiters.
     Sorting by created_at or stage_updated_at (asc/desc).
     Returns paginated data with total count and per-stage counts in metadata.
-    All results are org-scoped; scoped users (vendor/client) see only allowed pipelines.
+    All results are org-scoped; scoped users see only allowed pipelines.
     """
     service = PipelineService(db)
     pipelines, total, stage_counts = service.list_pipelines_paginated(
@@ -79,13 +84,48 @@ def list_pipelines(
         offset=offset,
         job_id=job_id,
         candidate_id=candidate_id,
+        client_id=client_id,
         stage=stage,
         pipeline_status=pipeline_status,
         sort_by=sort_by,
         sort_dir=sort_dir,
     )
+
+    # ── Batch-enrich with job title + client context (avoids N+1) ─────────────
+    # Build a single query for all unique job_ids in this page.
+    job_ids = list({p.job_id for p in pipelines if p.job_id})
+    job_info: dict[UUID, tuple[str, UUID | None]] = {}  # job_id → (title, client_id)
+    if job_ids:
+        try:
+            for row in db.execute(
+                select(Job.id, Job.title, Job.client_id).where(Job.id.in_(job_ids))
+            ):
+                job_info[row.id] = (row.title or "", row.client_id)
+        except Exception:
+            pass  # Degrade gracefully — fields stay None
+
+    client_ids = list({cid for _, (_, cid) in job_info.items() if cid is not None})
+    client_name_map: dict[UUID, str] = {}
+    if client_ids:
+        try:
+            for row in db.execute(
+                select(Client.id, Client.name).where(Client.id.in_(client_ids))
+            ):
+                client_name_map[row.id] = row.name
+        except Exception:
+            pass
+
+    def _enrich(p: "object") -> PipelineResponse:
+        base = PipelineResponse.model_validate(p)
+        jinfo = job_info.get(base.job_id)
+        if jinfo:
+            title, cid = jinfo
+            cname = client_name_map.get(cid) if cid else None
+            return base.model_copy(update={"job_title": title, "client_id": cid, "client_name": cname})
+        return base
+
     return PipelineListResponse(
-        data=[PipelineResponse.model_validate(p) for p in pipelines],
+        data=[_enrich(p) for p in pipelines],
         meta=PipelineListMeta(
             total=total,
             limit=limit,

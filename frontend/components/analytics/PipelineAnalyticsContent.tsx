@@ -119,9 +119,7 @@ export function PipelineAnalyticsContent({ hideHeader = false }: { hideHeader?: 
 
   const funnel = analytics?.funnel ?? [];
   const appliedCount = funnel.find((f) => f.stage === "applied")?.entered ?? 0;
-  const screeningCount =
-    (funnel.find((f) => f.stage === "screening")?.entered ?? 0) +
-    (funnel.find((f) => f.stage === "ai_screening")?.entered ?? 0);
+  const aiInterviewCount = funnel.find((f) => f.stage === "ai_interview")?.entered ?? 0;
   const interviewCount = funnel.find((f) => f.stage === "interview")?.entered ?? 0;
   const offerCount = funnel.find((f) => f.stage === "offer")?.entered ?? 0;
   const placedCount = funnel.find((f) => f.stage === "placed")?.entered ?? 0;
@@ -131,15 +129,15 @@ export function PipelineAnalyticsContent({ hideHeader = false }: { hideHeader?: 
   const dropOffs = [
     {
       from: "Applied",
-      to: "Screening",
-      drop: Math.max(0, appliedCount - screeningCount),
-      rate: appliedCount > 0 ? ((appliedCount - screeningCount) / appliedCount) * 100 : 0,
+      to: "AI Interview",
+      drop: Math.max(0, appliedCount - aiInterviewCount),
+      rate: appliedCount > 0 ? ((appliedCount - aiInterviewCount) / appliedCount) * 100 : 0,
     },
     {
-      from: "Screening",
+      from: "AI Interview",
       to: "Interview",
-      drop: Math.max(0, screeningCount - interviewCount),
-      rate: screeningCount > 0 ? ((screeningCount - interviewCount) / screeningCount) * 100 : 0,
+      drop: Math.max(0, aiInterviewCount - interviewCount),
+      rate: aiInterviewCount > 0 ? ((aiInterviewCount - interviewCount) / aiInterviewCount) * 100 : 0,
     },
     {
       from: "Interview",
@@ -339,7 +337,7 @@ export function PipelineAnalyticsContent({ hideHeader = false }: { hideHeader?: 
               <div className="space-y-3.5">
                 {[
                   { label: "Applied", val: appliedCount },
-                  { label: "Screening", val: screeningCount },
+                  { label: "AI Interview", val: aiInterviewCount },
                   { label: "Interview", val: interviewCount },
                   { label: "Offer", val: offerCount },
                   { label: "Placed", val: placedCount },

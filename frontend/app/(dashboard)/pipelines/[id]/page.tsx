@@ -36,8 +36,7 @@ import { OfferHistoryTimeline } from "@/components/pipeline/OfferHistoryTimeline
 
 const STAGE_LABELS: Record<PipelineStage, string> = {
   applied:      "Applied",
-  screening:    "Screening",
-  ai_screening: "AI Screening",
+  ai_interview: "AI Interview",
   interview:    "Interview",
   offer:        "Offer",
   placed:       "Placed",
@@ -46,8 +45,7 @@ const STAGE_LABELS: Record<PipelineStage, string> = {
 
 const STAGE_BADGE: Record<PipelineStage, string> = {
   applied:      "bg-violet-50 text-violet-700 border-violet-100",
-  screening:    "bg-sky-50 text-sky-700 border-sky-100",
-  ai_screening: "bg-orange-50 text-orange-700 border-orange-100",
+  ai_interview: "bg-orange-50 text-orange-700 border-orange-100",
   interview:    "bg-emerald-50 text-emerald-700 border-emerald-100",
   offer:        "bg-amber-50 text-amber-700 border-amber-100",
   placed:       "bg-cyan-50 text-cyan-700 border-cyan-100",

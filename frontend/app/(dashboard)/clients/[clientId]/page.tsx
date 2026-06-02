@@ -18,13 +18,14 @@ import { Button } from "@/components/ui/button";
 import { ClientWorkspaceForm } from "@/components/clients/ClientWorkspaceForm";
 import { DeleteClientDialog } from "@/components/clients/DeleteClientDialog";
 import { RecruiterAssignmentSelector } from "@/components/clients/RecruiterAssignmentSelector";
-import { getClient, softDeleteClient, updateClient } from "@/lib/api/clients";
+import { getClient, listAvailableRecruiters, softDeleteClient, updateClient } from "@/lib/api/clients";
 import { hasPermission } from "@/lib/rbac";
 import { useAuthStore } from "@/store/auth-store";
-import type { Client, ClientUpdatePayload } from "@/lib/api/types";
+import type { Client, ClientUpdatePayload, RecruiterUser } from "@/lib/api/types";
 
 const CLIENTS_UPDATE_PERMISSION = "clients:update";
 const CLIENTS_DELETE_PERMISSION = "clients:delete";
+const CLIENTS_ASSIGN_PERMISSION = "clients:assign";
 
 export default function ClientDetailPage() {
   const { clientId } = useParams<{ clientId: string }>();
@@ -32,19 +33,27 @@ export default function ClientDetailPage() {
   const permissions = useAuthStore((s) => s.permissions);
   const canUpdate = hasPermission(permissions, CLIENTS_UPDATE_PERMISSION);
   const canDelete = hasPermission(permissions, CLIENTS_DELETE_PERMISSION);
+  const canAssign =
+    hasPermission(permissions, CLIENTS_ASSIGN_PERMISSION) ||
+    hasPermission(permissions, CLIENTS_UPDATE_PERMISSION);
 
   const [client, setClient] = useState<Client | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
   const [showDelete, setShowDelete] = useState(false);
+  const [availableRecruiters, setAvailableRecruiters] = useState<RecruiterUser[]>([]);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const data = await getClient(clientId);
+      const [data, recruiters] = await Promise.all([
+        getClient(clientId),
+        listAvailableRecruiters(clientId).catch(() => [] as RecruiterUser[]),
+      ]);
       setClient(data);
+      setAvailableRecruiters(recruiters);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Failed to load client.");
     } finally {
@@ -181,18 +190,11 @@ export default function ClientDetailPage() {
       {!client.is_deleted && (
         <div className="rounded-lg border border-gray-200 bg-white p-4">
           <h3 className="mb-3 text-sm font-semibold text-gray-700">Assigned Recruiters</h3>
-          {canUpdate ? (
-            <RecruiterAssignmentSelector
-              clientId={client.id}
-              availableRecruiters={[]}
-            />
-          ) : (
-            <p className="text-sm text-gray-400">
-              {client.assigned_recruiter_ids?.length
-                ? `${client.assigned_recruiter_ids.length} recruiter(s) assigned`
-                : "No recruiters assigned."}
-            </p>
-          )}
+          <RecruiterAssignmentSelector
+            clientId={client.id}
+            availableRecruiters={availableRecruiters}
+            canAssign={canAssign}
+          />
         </div>
       )}
 

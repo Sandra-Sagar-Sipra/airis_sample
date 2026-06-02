@@ -15,8 +15,7 @@ import { cn } from "@/lib/utils";
 
 const STAGE_LABELS: Record<string, string> = {
   applied: "Applied",
-  screening: "Screening",
-  ai_screening: "AI Screening",
+  ai_interview: "AI Interview",
   interview: "Interview",
   offer: "Offer",
   placed: "Placed",
@@ -25,8 +24,7 @@ const STAGE_LABELS: Record<string, string> = {
 
 const STAGE_COLOR: Record<string, string> = {
   applied: "bg-violet-50 text-violet-700 border-violet-200",
-  screening: "bg-sky-50 text-sky-700 border-sky-200",
-  ai_screening: "bg-orange-50 text-orange-700 border-orange-200",
+  ai_interview: "bg-orange-50 text-orange-700 border-orange-200",
   interview: "bg-blue-50 text-blue-700 border-blue-200",
   offer: "bg-indigo-50 text-indigo-700 border-indigo-200",
   placed: "bg-emerald-50 text-emerald-700 border-emerald-200",

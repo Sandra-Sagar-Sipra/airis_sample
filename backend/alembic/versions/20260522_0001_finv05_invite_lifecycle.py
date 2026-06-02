@@ -5,7 +5,7 @@ Expands the status check constraint to cover: sent, opened, accepted, expired.
 Migrates existing rows: 'pending' → 'sent' (with sent_at = created_at).
 
 Revision ID: 20260522_0001
-Revises: 20260520_0003
+Revises: 20260522_0003
 Create Date: 2026-05-22
 """
 from __future__ import annotations
@@ -18,7 +18,7 @@ from sqlalchemy import inspect, text
 from sqlalchemy.dialects import postgresql
 
 revision: str = "20260522_0001"
-down_revision: str = "20260522_0002"
+down_revision: str = "20260522_0003"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

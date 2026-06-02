@@ -83,8 +83,7 @@ type ViewMode = "table" | "kanban";
 // Kanban uses a slightly different stage vocabulary for display.
 type BoardStage =
   | "applied"
-  | "screening"
-  | "ai_screening"
+  | "ai_interview"
   | "interview"
   | "offered"
   | "hired"
@@ -94,8 +93,7 @@ type BoardStage =
 
 const STAGE_LABELS_TABLE: Record<PipelineStage, string> = {
   applied: "Applied",
-  screening: "Screening",
-  ai_screening: "AI Screening",
+  ai_interview: "AI Screening Interview",
   interview: "Interview",
   offer: "Offer",
   placed: "Placed",
@@ -104,8 +102,7 @@ const STAGE_LABELS_TABLE: Record<PipelineStage, string> = {
 
 const STAGE_BADGE: Record<PipelineStage, string> = {
   applied: "bg-violet-50 text-violet-700 border-violet-100",
-  screening: "bg-sky-50 text-sky-700 border-sky-100",
-  ai_screening: "bg-orange-50 text-orange-700 border-orange-100",
+  ai_interview: "bg-orange-50 text-orange-700 border-orange-100",
   interview: "bg-emerald-50 text-emerald-700 border-emerald-100",
   offer: "bg-amber-50 text-amber-700 border-amber-100",
   placed: "bg-cyan-50 text-cyan-700 border-cyan-100",
@@ -128,8 +125,7 @@ const STATUS_LABELS: Record<PipelineStatus, string> = {
 
 const ALL_STAGES: PipelineStage[] = [
   "applied",
-  "screening",
-  "ai_screening",
+  "ai_interview",
   "interview",
   "offer",
   "placed",
@@ -149,8 +145,7 @@ const PAGE_SIZE_OPTIONS = [20, 50, 100] as const;
 
 const BOARD_STAGES: BoardStage[] = [
   "applied",
-  "screening",
-  "ai_screening",
+  "ai_interview",
   "interview",
   "offered",
   "hired",
@@ -159,8 +154,7 @@ const BOARD_STAGES: BoardStage[] = [
 
 const BOARD_STAGE_LABELS: Record<BoardStage, string> = {
   applied: "Applied",
-  screening: "Screening",
-  ai_screening: "AI Screening",
+  ai_interview: "AI Screening Interview",
   interview: "Interview",
   offered: "Offered",
   hired: "Hired",
@@ -169,8 +163,7 @@ const BOARD_STAGE_LABELS: Record<BoardStage, string> = {
 
 const BOARD_STAGE_ACCENT: Record<BoardStage, string> = {
   applied: "bg-violet-400",
-  screening: "bg-sky-400",
-  ai_screening: "bg-orange-400",
+  ai_interview: "bg-orange-400",
   interview: "bg-emerald-400",
   offered: "bg-amber-400",
   hired: "bg-cyan-400",
@@ -179,9 +172,8 @@ const BOARD_STAGE_ACCENT: Record<BoardStage, string> = {
 
 // Mirrors backend VALID_TRANSITIONS — prevents guaranteed 422s.
 const VALID_TRANSITIONS: Record<string, ReadonlySet<string>> = {
-  applied: new Set(["screening", "rejected"]),
-  screening: new Set(["interview", "rejected"]),
-  ai_screening: new Set(["interview", "rejected"]),
+  applied: new Set(["ai_interview", "rejected"]),
+  ai_interview: new Set(["interview", "rejected"]),
   interview: new Set(["offer", "rejected"]),
   offer: new Set(["placed", "rejected"]),
   placed: new Set(),
@@ -1000,6 +992,10 @@ export default function PipelineWorkspacePage() {
         offset,
         jobId: filterJobId || undefined,
         candidateId: filterCandidateId || undefined,
+        // Pass client_id to backend for server-side filtering (table view).
+        // This ensures admin and recruiter both get correct client-scoped results
+        // without client-side guessing.
+        clientId: selectedClientId || undefined,
         stage: (filterStage as PipelineStage) || undefined,
         status: (filterStatus as PipelineStatus) || undefined,
         sortBy,
@@ -1014,7 +1010,7 @@ export default function PipelineWorkspacePage() {
     } finally {
       setTableLoading(false);
     }
-  }, [limit, offset, filterJobId, filterCandidateId, filterStage, filterStatus, sortBy, sortDir]);
+  }, [limit, offset, filterJobId, filterCandidateId, selectedClientId, filterStage, filterStatus, sortBy, sortDir]);
 
   useEffect(() => {
     if (view === "table") {
@@ -1023,16 +1019,47 @@ export default function PipelineWorkspacePage() {
   }, [view, loadTablePipelines]);
 
   // ── Derived: client filter options ───────────────────────────────────────────
+  // Built from three sources (in priority order):
+  //  1. pipeline.client_name/client_id — embedded by the backend list endpoint
+  //  2. job.client_name — embedded in the jobs response
+  //  3. clientNameById — separately fetched via listAllClients()
+  // Using all three sources ensures client options appear even when the jobs list
+  // is scoped (e.g. a recruiter who doesn't directly see Default Client jobs but
+  // whose pipelines still reference them).
   const clientFilterOptions = useMemo(() => {
-    const ids = Array.from(
-      new Set(jobs.map((j) => j.client_id).filter((id): id is string => Boolean(id)))
-    );
-    return ids
-      .map((id) => ({ id, label: clientNameById[id]?.trim() || "Unknown client" }))
-      .sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: "base" }));
-  }, [jobs, clientNameById]);
+    const seen = new Map<string, string>();
 
-  const hasClients = jobs.some((j) => j.client_id);
+    // Source 1: pipeline entries from both table and kanban views.
+    for (const p of [...tablePipelines, ...kanbanPipelines]) {
+      const cid = p.client_id;
+      if (!cid) continue;
+      const label =
+        p.client_name?.trim() ||
+        clientNameById[cid]?.trim() ||
+        `Client ${cid.slice(0, 8)}`;
+      seen.set(cid, label);
+    }
+
+    // Source 2: jobs list (recruiter-scoped but includes Default Client jobs via backend fix).
+    for (const j of jobs) {
+      if (!j.client_id) continue;
+      if (seen.has(j.client_id)) continue; // already set from pipeline — higher fidelity
+      const label =
+        j.client_name?.trim() ||
+        clientNameById[j.client_id]?.trim() ||
+        `Client ${j.client_id.slice(0, 8)}`;
+      seen.set(j.client_id, label);
+    }
+
+    return Array.from(seen.entries())
+      .map(([id, label]) => ({ id, label }))
+      .sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: "base" }));
+  }, [jobs, clientNameById, tablePipelines, kanbanPipelines]);
+
+  const hasClients =
+    jobs.some((j) => j.client_id) ||
+    tablePipelines.some((p) => p.client_id) ||
+    kanbanPipelines.some((p) => p.client_id);
 
   // ── Derived: kanban grouped board ────────────────────────────────────────────
   const candidateMap = useMemo(
@@ -1543,18 +1570,34 @@ export default function PipelineWorkspacePage() {
                             </Link>
                           </td>
                           <td className="px-5 py-3.5">
-                            {job ? (
-                              <Link
-                                href={`/jobs/${pipeline.job_id}`}
-                                className="text-[13px] font-medium text-slate-700 hover:text-[#FF5A1F] transition-colors truncate block max-w-[200px]"
-                              >
-                                {job.title}
-                              </Link>
-                            ) : (
-                              <span className="font-mono text-[11px] text-slate-400">
-                                {pipeline.job_id.slice(0, 8)}…
-                              </span>
-                            )}
+                            <div className="min-w-0">
+                              {(pipeline.client_name || (job && (job.client_name || clientNameById[job.client_id ?? ""]))) && (
+                                <p className="truncate text-[10px] font-semibold text-orange-500 uppercase tracking-wide mb-0.5">
+                                  {pipeline.client_name ||
+                                    job?.client_name ||
+                                    (job?.client_id ? clientNameById[job.client_id] : null)}
+                                </p>
+                              )}
+                              {job ? (
+                                <Link
+                                  href={`/jobs/${pipeline.job_id}`}
+                                  className="text-[13px] font-medium text-slate-700 hover:text-[#FF5A1F] transition-colors truncate block max-w-[200px]"
+                                >
+                                  {job.title}
+                                </Link>
+                              ) : pipeline.job_title ? (
+                                <Link
+                                  href={`/jobs/${pipeline.job_id}`}
+                                  className="text-[13px] font-medium text-slate-700 hover:text-[#FF5A1F] transition-colors truncate block max-w-[200px]"
+                                >
+                                  {pipeline.job_title}
+                                </Link>
+                              ) : (
+                                <span className="font-mono text-[11px] text-slate-400">
+                                  {pipeline.job_id.slice(0, 8)}…
+                                </span>
+                              )}
+                            </div>
                           </td>
                           <td className="px-5 py-3.5">
                             <StageBadge stage={pipeline.stage} />

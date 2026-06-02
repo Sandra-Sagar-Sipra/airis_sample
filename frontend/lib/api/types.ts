@@ -146,7 +146,7 @@ export type Candidate = {
   phone: string | null;
   location: string | null;
   role: string | null;
-  stage?: "applied" | "screening" | "shortlisted" | "interview" | "offered" | "hired" | "rejected";
+  stage?: "applied" | "ai_interview" | "shortlisted" | "interview" | "offered" | "hired" | "rejected";
   job_id?: string | null;
   recruiter_id?: string | null;
   resume_s3_key?: string | null;
@@ -252,12 +252,23 @@ export type ClientRecruiter = {
   recruiter_id: string;
   assigned_at: string;
   assigned_by: string | null;
+  /** Enriched at API time from the profiles table. */
+  email: string | null;
+  role: string | null;
+};
+
+/** Recruiter-eligible user returned by the assignment dropdown endpoint. */
+export type RecruiterUser = {
+  id: string;
+  email: string;
+  role: string;
 };
 
 export type Job = {
   id: string;
   organization_id: string;
   client_id?: string | null;
+  client_name?: string | null;  // Embedded from clients table — avoids separate lookup
   title: string;
   description: string | null;
   status: JobStatus;
@@ -319,12 +330,24 @@ export type JobMatchEntry = {
     experience: number;
     title: number;
     education: number;
+    // v2 weight categories
+    communication?: number | null;
+    culture?: number | null;
+    breadth?: number | null;
     hybrid?: {
       deterministic_score?: number;
       semantic_score?: number | null;
       final_score?: number;
       weights?: { deterministic?: number; semantic?: number };
     };
+    // v2 debug transparency
+    skill_match_log?: Array<{
+      jd_skill: string;
+      match_type: "exact" | "synonym" | "category" | "missing";
+      candidate_skill?: string | null;
+      section?: "required" | "preferred";
+    }> | null;
+    score_explanation?: string | null;
   };
   already_submitted: boolean;
   matched_skills: string[];
@@ -368,12 +391,24 @@ export type CandidateMatchEntry = {
     experience: number;
     title: number;
     education: number;
+    // v2 weight categories
+    communication?: number | null;
+    culture?: number | null;
+    breadth?: number | null;
     hybrid?: {
       deterministic_score?: number;
       semantic_score?: number | null;
       final_score?: number;
       weights?: { deterministic?: number; semantic?: number };
     };
+    // v2 debug transparency
+    skill_match_log?: Array<{
+      jd_skill: string;
+      match_type: "exact" | "synonym" | "category" | "missing";
+      candidate_skill?: string | null;
+      section?: "required" | "preferred";
+    }> | null;
+    score_explanation?: string | null;
   };
   matched_skills: string[];
   missing_skills: string[];
@@ -407,7 +442,7 @@ export type AtsPairStatusResponse = {
   enqueue_delay_ms?: number | null;
 };
 
-export type PipelineStage = "applied" | "screening" | "ai_screening" | "interview" | "offer" | "placed" | "rejected";
+export type PipelineStage = "applied" | "ai_interview" | "interview" | "offer" | "placed" | "rejected";
 export type PipelineStatus = "active" | "on_hold" | "withdrawn" | "closed";
 
 export type Pipeline = {
@@ -424,6 +459,10 @@ export type Pipeline = {
   status_changed_at: string | null;
   created_at: string;
   updated_at: string;
+  /** Denormalized job + client context — populated on paginated list responses only. */
+  job_title?: string | null;
+  client_id?: string | null;
+  client_name?: string | null;
 };
 
 /** PIPE-004: Metadata returned in paginated pipeline list responses. */

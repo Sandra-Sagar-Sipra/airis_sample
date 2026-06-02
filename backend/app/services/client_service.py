@@ -9,7 +9,8 @@ from sqlalchemy.orm import Session
 
 from app.models.client import Client
 from app.models.client_recruiter_assignment import ClientRecruiterAssignment
-from app.schemas.client import ClientCreate, ClientRecruiterResponse, ClientUpdate
+from app.models.profile import Profile
+from app.schemas.client import ClientCreate, ClientRecruiterResponse, ClientUpdate, RecruiterUserResponse
 
 
 class ClientService:
@@ -229,10 +230,53 @@ class ClientService:
         client_id: UUID,
         organization_id: UUID,
     ) -> list[ClientRecruiterResponse]:
+        """Return assigned recruiters enriched with email and role from profiles."""
         self.get_client_by_id(client_id, organization_id)
-        rows = self.db.scalars(
-            select(ClientRecruiterAssignment).where(
-                ClientRecruiterAssignment.client_id == client_id
+        rows = self.db.execute(
+            select(
+                ClientRecruiterAssignment.recruiter_id,
+                ClientRecruiterAssignment.assigned_at,
+                ClientRecruiterAssignment.assigned_by,
+                Profile.email,
+                Profile.role,
             )
+            .outerjoin(Profile, Profile.id == ClientRecruiterAssignment.recruiter_id)
+            .where(ClientRecruiterAssignment.client_id == client_id)
+            .order_by(Profile.email.asc())
         ).all()
-        return [ClientRecruiterResponse.model_validate(r) for r in rows]
+        return [
+            ClientRecruiterResponse(
+                recruiter_id=row.recruiter_id,
+                assigned_at=row.assigned_at,
+                assigned_by=row.assigned_by,
+                email=row.email,
+                role=row.role,
+            )
+            for row in rows
+        ]
+
+    def list_available_recruiters(
+        self,
+        organization_id: UUID,
+    ) -> list[RecruiterUserResponse]:
+        """Return all recruiter-role users in the org for the assignment dropdown.
+
+        Excludes admin and vendor roles — only meaningful assignment targets.
+        """
+        stmt = (
+            select(Profile)
+            .where(
+                Profile.organization_id == organization_id,
+                Profile.role.notin_(["admin", "superadmin", "vendor"]),
+            )
+            .order_by(Profile.email.asc())
+        )
+        profiles = self.db.scalars(stmt).all()
+        return [
+            RecruiterUserResponse(
+                id=str(p.id),
+                email=p.email,
+                role=p.role,
+            )
+            for p in profiles
+        ]

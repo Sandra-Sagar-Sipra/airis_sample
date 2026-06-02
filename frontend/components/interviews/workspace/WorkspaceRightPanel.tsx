@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ClipboardList, FileText, ListChecks, MessageSquareText, Settings2 } from "lucide-react";
+import { ClipboardList, FileText, ListChecks, MessageSquareText, Settings2, X } from "lucide-react";
 import { NotesPanel } from "./NotesPanel";
 import { ControlsPanel } from "./ControlsPanel";
 import { InterviewQuestionsPanel } from "./InterviewQuestionsPanel";
@@ -21,6 +21,7 @@ export function WorkspaceRightPanel({
   onScorecardOpen,
   onInterviewUpdated,
   jobTitle,
+  onCloseFloating,
 }: {
   interviewId: string;
   interview: Interview;
@@ -32,6 +33,7 @@ export function WorkspaceRightPanel({
   onInterviewUpdated: (updated: Interview) => void;
   /** Job title from the workspace — passed to the Questions panel. */
   jobTitle?: string | null;
+  onCloseFloating?: () => void;
 }) {
   // Transcript is the primary live tool — open it first.
   const [activeTab, setActiveTab] = useState<Tab>("transcript");
@@ -46,27 +48,38 @@ export function WorkspaceRightPanel({
   return (
     <div className="flex flex-col h-full">
       {/* Tab bar — order: Transcript | Notes | Questions | Summary | Controls */}
-      <div className="flex shrink-0 border-b border-gray-200 bg-white overflow-x-auto">
-        <button onClick={() => setActiveTab("transcript")} className={tabClass("transcript")}>
-          <MessageSquareText className="w-3.5 h-3.5" />
-          Transcript
-        </button>
-        <button onClick={() => setActiveTab("notes")} className={tabClass("notes")}>
-          <ClipboardList className="w-3.5 h-3.5" />
-          Notes
-        </button>
-        <button onClick={() => setActiveTab("questions")} className={tabClass("questions")}>
-          <ListChecks className="w-3.5 h-3.5" />
-          Questions
-        </button>
-        <button onClick={() => setActiveTab("summary")} className={tabClass("summary")}>
-          <FileText className="w-3.5 h-3.5" />
-          Summary
-        </button>
-        <button onClick={() => setActiveTab("controls")} className={tabClass("controls")}>
-          <Settings2 className="w-3.5 h-3.5" />
-          Controls
-        </button>
+      <div className="flex items-center justify-between shrink-0 border-b border-gray-200 bg-white overflow-x-auto pr-2">
+        <div className="flex">
+          <button onClick={() => setActiveTab("transcript")} className={tabClass("transcript")}>
+            <MessageSquareText className="w-3.5 h-3.5" />
+            Transcript
+          </button>
+          <button onClick={() => setActiveTab("notes")} className={tabClass("notes")}>
+            <ClipboardList className="w-3.5 h-3.5" />
+            Notes
+          </button>
+          <button onClick={() => setActiveTab("questions")} className={tabClass("questions")}>
+            <ListChecks className="w-3.5 h-3.5" />
+            Questions
+          </button>
+          <button onClick={() => setActiveTab("summary")} className={tabClass("summary")}>
+            <FileText className="w-3.5 h-3.5" />
+            Summary
+          </button>
+          <button onClick={() => setActiveTab("controls")} className={tabClass("controls")}>
+            <Settings2 className="w-3.5 h-3.5" />
+            Controls
+          </button>
+        </div>
+        {onCloseFloating && (
+          <button
+            onClick={onCloseFloating}
+            className="p-1.5 ml-2 rounded-md text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors"
+            title="Close Panel"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        )}
       </div>
 
       {/* Panel content — flex column so each active tab gets a proper

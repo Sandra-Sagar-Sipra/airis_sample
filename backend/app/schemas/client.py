@@ -37,9 +37,24 @@ class ClientUpdate(BaseModel):
 
 
 class ClientRecruiterResponse(BaseModel):
+    """Assignment record enriched with the recruiter's email and role."""
+
     recruiter_id: UUID
     assigned_at: datetime
     assigned_by: UUID | None
+    # Profile fields joined at query time — may be None if profile was deleted.
+    email: str | None = None
+    role: str | None = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class RecruiterUserResponse(BaseModel):
+    """Minimal user record returned by the available-recruiters dropdown endpoint."""
+
+    id: str
+    email: str
+    role: str
 
     model_config = ConfigDict(from_attributes=True)
 

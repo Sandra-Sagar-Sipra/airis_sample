@@ -170,13 +170,13 @@ class AnalyticsRepository:
 
     def get_time_to_shortlist(self, org_id: UUID, current_user: CurrentUser) -> Dict[str, Any]:
         base_where = self._base_job_query(org_id, current_user)
-        # Average days from pipeline creation to screening or interview
+        # Average days from pipeline creation to AI interview or interview
         rows = self.db.execute(
             select(func.extract('epoch', PipelineStageHistory.transitioned_at - Pipeline.created_at) / 86400.0)
             .select_from(PipelineStageHistory)
             .join(Pipeline, PipelineStageHistory.pipeline_id == Pipeline.id)
             .join(Job, Pipeline.job_id == Job.id)
-            .where(*base_where, PipelineStageHistory.new_stage.in_(["screening", "interview"]))
+            .where(*base_where, PipelineStageHistory.new_stage.in_(["ai_interview", "interview"]))
         ).scalars().all()
         
         days = [r for r in rows if r is not None and r >= 0]

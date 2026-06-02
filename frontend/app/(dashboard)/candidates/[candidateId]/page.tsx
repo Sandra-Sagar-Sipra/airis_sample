@@ -1214,9 +1214,43 @@ export default function CandidateDetailPage() {
                   onChange={(event) => setSubmitJobId(event.target.value)}
                 >
                   <option value="">Select job...</option>
-                  {jobs.map((job) => (
-                    <option key={job.id} value={job.id}>{job.title}</option>
-                  ))}
+                  {jobs.length === 0 && (
+                    <option disabled value="">No jobs available</option>
+                  )}
+                  {/* Group jobs by client for clarity; ungrouped if no client info */}
+                  {(() => {
+                    const withClient = jobs.filter((j) => j.client_id && j.client_name);
+                    const noClient = jobs.filter((j) => !j.client_id || !j.client_name);
+                    // Build per-client groups
+                    const clientGroups = new Map<string, { label: string; jobs: typeof jobs }>();
+                    for (const j of withClient) {
+                      const cid = j.client_id!;
+                      const label = j.client_name || cid.slice(0, 8);
+                      if (!clientGroups.has(cid)) clientGroups.set(cid, { label, jobs: [] });
+                      clientGroups.get(cid)!.jobs.push(j);
+                    }
+                    const groups = Array.from(clientGroups.values()).sort((a, b) =>
+                      a.label.localeCompare(b.label, undefined, { sensitivity: "base" })
+                    );
+                    return (
+                      <>
+                        {groups.map(({ label, jobs: groupJobs }) => (
+                          <optgroup key={label} label={label}>
+                            {groupJobs.map((job) => (
+                              <option key={job.id} value={job.id}>{job.title}</option>
+                            ))}
+                          </optgroup>
+                        ))}
+                        {noClient.length > 0 && (
+                          <optgroup label="Unassigned">
+                            {noClient.map((job) => (
+                              <option key={job.id} value={job.id}>{job.title}</option>
+                            ))}
+                          </optgroup>
+                        )}
+                      </>
+                    );
+                  })()}
                 </select>
                 <Button
                   onClick={handleSubmitToJob}
@@ -1226,6 +1260,11 @@ export default function CandidateDetailPage() {
                   {submittingToJob ? "..." : "Submit"}
                 </Button>
               </div>
+              {jobs.length === 0 && (
+                <p className="text-[11px] text-slate-400">
+                  No open jobs found. Ask your admin to create a job and assign you to a client workspace.
+                </p>
+              )}
             </div>
           </div>
         </div >

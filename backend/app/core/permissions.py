@@ -38,6 +38,9 @@ CLIENTS_CREATE = "clients:create"
 CLIENTS_READ = "clients:read"
 CLIENTS_UPDATE = "clients:update"
 CLIENTS_DELETE = "clients:delete"
+# Dedicated permission for assigning/removing recruiters from a client workspace.
+# Admins always have this; recruiters do not by default.
+CLIENTS_ASSIGN = "clients:assign"
 ATS_READ = "ats:read"
 ATS_RESCORE = "ats:rescore"
 
@@ -84,6 +87,7 @@ ALL_PERMISSIONS: tuple[str, ...] = (
     CLIENTS_READ,
     CLIENTS_UPDATE,
     CLIENTS_DELETE,
+    CLIENTS_ASSIGN,
     ATS_READ,
     ATS_RESCORE,
     AI_SCREENING_CREATE,

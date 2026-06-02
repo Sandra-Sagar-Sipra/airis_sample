@@ -114,6 +114,8 @@ export type PipelineListParams = {
   offset?: number;
   jobId?: string;
   candidateId?: string;
+  /** Filter pipelines to those whose linked job belongs to this client workspace. */
+  clientId?: string;
   stage?: PipelineStage;
   status?: "active" | "on_hold" | "withdrawn" | "closed";
   sortBy?: "created_at" | "stage_updated_at";
@@ -127,6 +129,7 @@ function buildPipelineParams(params: PipelineListParams): URLSearchParams {
   });
   if (params.jobId) p.set("job_id", params.jobId);
   if (params.candidateId) p.set("candidate_id", params.candidateId);
+  if (params.clientId) p.set("client_id", params.clientId);
   if (params.stage) p.set("stage", params.stage);
   if (params.status) p.set("status", params.status);
   if (params.sortBy) p.set("sort_by", params.sortBy);

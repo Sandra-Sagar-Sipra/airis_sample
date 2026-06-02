@@ -34,6 +34,13 @@ from app.models.permission import Permission  # noqa: F401
 from app.models.pipeline import Pipeline, PipelineStageHistory  # noqa: F401
 from app.models.profile import Profile  # noqa: F401
 from app.models.role_permission import RolePermission  # noqa: F401
+from app.models.ai_screening import (  # noqa: F401
+    AIScreening,
+    AIScreeningAnswer,
+    AIScreeningEvaluation,
+    AIScreeningMessage,
+    AIScreeningQuestion,
+)
 
 config = context.config
 

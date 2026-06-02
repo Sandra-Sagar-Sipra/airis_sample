@@ -1,4 +1,3 @@
-import threading
 import time
 
 from fastapi import FastAPI, Request
@@ -21,6 +20,7 @@ from app.routes.interview import router as interview_router
 from app.routes.interview_copilot import router as interview_copilot_router
 from app.routes.ai_screening import router as ai_screening_router
 from app.websocket.copilot_ws import ws_router as copilot_ws_router
+from app.websocket.ai_screening_ws import ws_router as ai_screening_ws_router
 from app.routes.invites import router as invites_router
 from app.routes.job import router as job_router
 from app.routes.me import router as me_router
@@ -36,6 +36,7 @@ from app.routes.pipeline_analytics import router as pipeline_analytics_router
 from app.routes.offer import router as offer_router
 from app.routes.sourcing import router as sourcing_router
 from app.routes.ai_interview_questions import router as ai_interview_questions_router
+from app.core.lifespan import app_lifespan
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
@@ -54,6 +55,7 @@ if not _docs_on:
 app = FastAPI(
     title=settings.app_name,
     debug=settings.debug,
+    lifespan=app_lifespan,
     # Expose /docs, /redoc, /openapi.json only in non-production environments.
     docs_url="/docs" if _docs_on else None,
     redoc_url="/redoc" if _docs_on else None,
@@ -232,52 +234,6 @@ async def request_timing_middleware(request: Request, call_next):
     return response
 
 
-@app.on_event("startup")
-async def _capture_event_loop() -> None:
-    """Store the main asyncio event loop so background threads can schedule
-    coroutines (e.g. WebSocket notifications) onto it."""
-    import asyncio
-    from app.services import copilot_service
-    copilot_service._main_event_loop = asyncio.get_running_loop()
-
-
-@app.on_event("startup")
-def startup_event() -> None:
-    # Permission backfill hits the DB for every org; run off the critical path so
-    # uvicorn can accept traffic immediately (reflection is lazy — see reflected.py).
-    threading.Thread(
-        target=_backfill_permissions,
-        name="permission-backfill",
-        daemon=True,
-    ).start()
-    # PIPE-008: start background offer expiry scheduler.
-    from app.scheduler import start_offer_expiry_scheduler
-    start_offer_expiry_scheduler()
-
-
-@app.on_event("shutdown")
-def shutdown_event() -> None:
-    from app.scheduler import stop_offer_expiry_scheduler
-    from app.services.task_runner import shutdown_task_runner
-
-    stop_offer_expiry_scheduler()
-    shutdown_task_runner(wait=False)
-
-
-def _backfill_permissions() -> None:
-    """Idempotently propagate new permissions to all existing org roles."""
-    from app.core.signup_permissions import backfill_all_organizations
-    from app.db.session import SessionLocal
-
-    db = SessionLocal()
-    try:
-        backfill_all_organizations(db)
-    except Exception:
-        logger.exception("startup.permission_backfill_failed — permissions may be missing for some orgs")
-    finally:
-        db.close()
-
-
 app.include_router(health_router, prefix="/api/v1")
 app.include_router(auth_router, prefix="/api/v1")
 app.include_router(me_router, prefix="/api/v1")
@@ -294,6 +250,7 @@ app.include_router(interview_router, prefix="/api/v1")
 app.include_router(interview_copilot_router, prefix="/api/v1")
 app.include_router(copilot_ws_router, prefix="/api/v1")
 app.include_router(ai_screening_router, prefix="/api/v1")
+app.include_router(ai_screening_ws_router, prefix="/api/v1")
 app.include_router(invites_router, prefix="/api/v1/invites", tags=["invites"])
 app.include_router(permission_catalog_router, prefix="/api/v1")
 app.include_router(roles_router, prefix="/api/v1/roles", tags=["roles"])

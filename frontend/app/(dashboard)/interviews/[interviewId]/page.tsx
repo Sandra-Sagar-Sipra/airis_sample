@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useParams } from "next/navigation";
-import { ArrowLeft, AlertCircle } from "lucide-react";
+import { ArrowLeft, AlertCircle, PanelRightClose, PanelRightOpen, MessageSquareText, ChevronsLeft, User } from "lucide-react";
 import Link from "next/link";
 import { getWorkspace, startInterview } from "@/lib/api/interviews";
 import { CandidateContextPanel } from "@/components/interviews/workspace/CandidateContextPanel";
@@ -32,6 +32,13 @@ export default function InterviewWorkspacePage() {
   const [showScorecard, setShowScorecard] = useState(false);
   const [feedbackList, setFeedbackList] = useState<InterviewFeedback[]>([]);
   const [interview, setInterview] = useState<Interview | null>(null);
+  
+  // Floating Layout State
+  const [isPanelFloating, setIsPanelFloating] = useState(false);
+  const [isFloatingPanelOpen, setIsFloatingPanelOpen] = useState(false);
+
+  // Candidate Panel State
+  const [isCandidatePanelOpen, setIsCandidatePanelOpen] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -108,7 +115,7 @@ export default function InterviewWorkspacePage() {
     // The context holds a MutableRef — no re-renders triggered on room change.
     <LiveKitProvider>
       {/* Full-height 3-panel layout */}
-      <div className="flex flex-col h-full -m-4 sm:-m-6 lg:-m-8">
+      <div className="flex flex-col h-[calc(100vh-64px)] -m-4 sm:-m-6 lg:-m-8">
         {/* Topbar */}
         <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-200 bg-white shrink-0">
           <Link
@@ -123,48 +130,122 @@ export default function InterviewWorkspacePage() {
           {workspace.job_title && (
             <span className="text-xs text-gray-400">· {workspace.job_title}</span>
           )}
-          <div className="ml-auto">
+          <div className="ml-auto flex items-center gap-3">
+            <button
+              onClick={() => {
+                if (isPanelFloating) {
+                  // Switch back to docked
+                  setIsPanelFloating(false);
+                  setIsFloatingPanelOpen(false);
+                } else {
+                  // Switch to floating
+                  setIsPanelFloating(true);
+                  setIsFloatingPanelOpen(true);
+                }
+              }}
+              className="flex items-center justify-center p-1.5 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-md transition-colors"
+              title={isPanelFloating ? "Dock Panel" : "Float Panel"}
+            >
+              {isPanelFloating ? <PanelRightClose className="w-5 h-5" /> : <PanelRightOpen className="w-5 h-5" />}
+            </button>
             <InterviewStatusBadge status={interview.status} />
           </div>
         </div>
 
         {/* 3-panel body */}
-        <div className="flex flex-1 min-h-0">
-          {/* Left — Candidate Context (260px) */}
-          <aside className="w-64 shrink-0 border-r border-gray-200 bg-gray-50 overflow-y-auto">
-            <div className="p-4">
-              <CandidateContextPanel
-                candidate={workspace.candidate}
-                jobTitle={workspace.job_title}
-                feedbackSummary={workspace.feedback_summary}
-              />
-            </div>
+        <div className="flex flex-1 min-h-0 relative">
+          {/* Left — Candidate Context */}
+          <aside className={`shrink-0 border-r border-gray-200 bg-gray-50 overflow-y-auto transition-all duration-300 ${isCandidatePanelOpen ? "w-64" : "w-16"}`}>
+            {isCandidatePanelOpen ? (
+              <div className="p-4 flex flex-col h-full">
+                <div className="flex items-center justify-between mb-4 shrink-0">
+                  <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wider flex items-center gap-1.5">
+                    <User className="w-3.5 h-3.5" />
+                    Candidate Details
+                  </h2>
+                  <button 
+                    onClick={() => setIsCandidatePanelOpen(false)} 
+                    className="p-1 text-gray-400 hover:text-gray-700 hover:bg-gray-200 rounded transition-colors"
+                    title="Collapse Details"
+                  >
+                    <ChevronsLeft className="w-4 h-4" />
+                  </button>
+                </div>
+                <div className="flex-1 min-h-0">
+                  <CandidateContextPanel
+                    candidate={workspace.candidate}
+                    jobTitle={workspace.job_title}
+                    feedbackSummary={workspace.feedback_summary}
+                  />
+                </div>
+              </div>
+            ) : (
+              <div className="p-3 flex flex-col items-center mt-2">
+                <button 
+                  onClick={() => setIsCandidatePanelOpen(true)}
+                  className="p-2.5 rounded-xl bg-white border border-orange-200 text-[#FF5A1F] hover:bg-orange-50 shadow-sm transition-colors"
+                  title="Expand Candidate Details"
+                >
+                  <User className="w-5 h-5" />
+                </button>
+              </div>
+            )}
           </aside>
 
           {/* Center — Meeting area (flex-1) */}
-          <main className="flex-1 min-w-0 overflow-hidden bg-gray-50">
+          <main className="flex-1 min-w-0 overflow-hidden bg-gray-50 relative">
             <MeetingContainer
               interviewId={interviewId}
               meetingUrl={interview.meeting_link}
               interviewStatus={interview.status}
               onMeetingStarted={handleMeetingStarted}
             />
+
+            {/* Floating Toggle Button (Visible only when floating and closed) */}
+            {isPanelFloating && !isFloatingPanelOpen && (
+              <button
+                onClick={() => setIsFloatingPanelOpen(true)}
+                className="absolute top-4 right-4 z-40 flex items-center gap-2 px-4 py-2 bg-white border border-gray-200 shadow-lg rounded-full text-sm font-medium text-gray-700 hover:bg-gray-50 hover:shadow-xl transition-all"
+              >
+                <MessageSquareText className="w-4 h-4 text-[#FF5A1F]" />
+                Open Tools
+              </button>
+            )}
           </main>
 
-          {/* Right — Notes + Controls tabbed panel (320px) */}
-          <aside className="w-80 shrink-0 border-l border-gray-200 bg-white overflow-hidden">
-            <WorkspaceRightPanel
-              interviewId={interviewId}
-              interview={interview}
-              participants={workspace.participants}
-              feedbackList={feedbackList}
-              initialNotes={workspace.notes}
-              currentUserId={currentUserId}
-              onScorecardOpen={() => setShowScorecard(true)}
-              onInterviewUpdated={handleInterviewUpdated}
-              jobTitle={workspace.job_title}
-            />
-          </aside>
+          {/* Right — Notes + Controls tabbed panel */}
+          {!isPanelFloating ? (
+            <aside className="w-80 shrink-0 border-l border-gray-200 bg-white overflow-hidden">
+              <WorkspaceRightPanel
+                interviewId={interviewId}
+                interview={interview}
+                participants={workspace.participants}
+                feedbackList={feedbackList}
+                initialNotes={workspace.notes}
+                currentUserId={currentUserId}
+                onScorecardOpen={() => setShowScorecard(true)}
+                onInterviewUpdated={handleInterviewUpdated}
+                jobTitle={workspace.job_title}
+              />
+            </aside>
+          ) : (
+            isFloatingPanelOpen && (
+              <aside className="absolute top-4 right-4 bottom-4 w-80 z-50 bg-white rounded-xl shadow-2xl border border-gray-200 overflow-hidden flex flex-col">
+                <WorkspaceRightPanel
+                  interviewId={interviewId}
+                  interview={interview}
+                  participants={workspace.participants}
+                  feedbackList={feedbackList}
+                  initialNotes={workspace.notes}
+                  currentUserId={currentUserId}
+                  onScorecardOpen={() => setShowScorecard(true)}
+                  onInterviewUpdated={handleInterviewUpdated}
+                  jobTitle={workspace.job_title}
+                  onCloseFloating={() => setIsFloatingPanelOpen(false)}
+                />
+              </aside>
+            )
+          )}
         </div>
       </div>
 

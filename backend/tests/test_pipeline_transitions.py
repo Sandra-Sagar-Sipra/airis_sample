@@ -36,16 +36,16 @@ class TestValidTransitionsMap:
             assert VALID_TRANSITIONS[terminal.value] == frozenset(), \
                 f"{terminal.value} should be terminal (no outbound transitions)"
 
-    def test_applied_can_go_to_screening_or_rejected(self):
-        assert "screening" in VALID_TRANSITIONS["applied"]
+    def test_applied_can_go_to_ai_interview_or_rejected(self):
+        assert "ai_interview" in VALID_TRANSITIONS["applied"]
         assert "rejected" in VALID_TRANSITIONS["applied"]
         assert "interview" not in VALID_TRANSITIONS["applied"]
         assert "offer" not in VALID_TRANSITIONS["applied"]
 
-    def test_screening_can_go_to_interview_or_rejected(self):
-        assert "interview" in VALID_TRANSITIONS["screening"]
-        assert "rejected" in VALID_TRANSITIONS["screening"]
-        assert "offer" not in VALID_TRANSITIONS["screening"]
+    def test_ai_interview_can_go_to_interview_or_rejected(self):
+        assert "interview" in VALID_TRANSITIONS["ai_interview"]
+        assert "rejected" in VALID_TRANSITIONS["ai_interview"]
+        assert "offer" not in VALID_TRANSITIONS["ai_interview"]
 
     def test_interview_can_go_to_offer_or_rejected(self):
         assert "offer" in VALID_TRANSITIONS["interview"]
@@ -73,8 +73,8 @@ class TestValidTransitionsMap:
 
 class TestPipelineStageTransitionRequestSchema:
     def test_valid_transition_without_reason(self):
-        req = PipelineStageTransitionRequest(stage="screening")
-        assert req.stage == PipelineStage.SCREENING
+        req = PipelineStageTransitionRequest(stage="ai_interview")
+        assert req.stage == PipelineStage.AI_INTERVIEW
         assert req.reason is None
 
     def test_stage_normalised_lowercase(self):
@@ -149,16 +149,16 @@ class TestPipelineServiceTransitionStage:
         svc.get_pipeline_by_id = MagicMock(return_value=pipeline)
         return svc
 
-    def test_valid_transition_applied_to_screening(self):
+    def test_valid_transition_applied_to_ai_interview(self):
         pipeline = _make_pipeline("applied")
         svc = self._make_service(pipeline)
         user = _make_current_user()
-        payload = PipelineStageTransitionRequest(stage="screening")
+        payload = PipelineStageTransitionRequest(stage="ai_interview")
 
         with patch("app.services.pipeline_service._notify_stage_change"):
             result = svc.transition_stage(pipeline.id, pipeline.organization_id, user, payload)
 
-        assert pipeline.stage == "screening"
+        assert pipeline.stage == "ai_interview"
         svc.db.commit.assert_called_once()
 
     def test_valid_transition_interview_to_offer(self):
@@ -231,7 +231,7 @@ class TestPipelineServiceTransitionStage:
         pipeline = _make_pipeline("rejected")
         svc = self._make_service(pipeline)
         user = _make_current_user()
-        payload = PipelineStageTransitionRequest(stage="screening")
+        payload = PipelineStageTransitionRequest(stage="ai_interview")
 
         with pytest.raises(HTTPException) as exc_info:
             with patch("app.services.pipeline_service._notify_stage_change"):
@@ -240,7 +240,7 @@ class TestPipelineServiceTransitionStage:
         assert exc_info.value.status_code == 422
 
     def test_history_row_written(self):
-        pipeline = _make_pipeline("screening")
+        pipeline = _make_pipeline("ai_interview")
         svc = self._make_service(pipeline)
         user = _make_current_user()
         payload = PipelineStageTransitionRequest(stage="interview")
@@ -254,7 +254,7 @@ class TestPipelineServiceTransitionStage:
         added_objects = [c.args[0] for c in svc.db.add.call_args_list]
         history_rows = [o for o in added_objects if isinstance(o, PipelineStageHistory)]
         assert len(history_rows) == 1
-        assert history_rows[0].previous_stage == "screening"
+        assert history_rows[0].previous_stage == "ai_interview"
         assert history_rows[0].new_stage == "interview"
 
     def test_notification_not_blocking(self):
@@ -262,7 +262,7 @@ class TestPipelineServiceTransitionStage:
         pipeline = _make_pipeline("applied")
         svc = self._make_service(pipeline)
         user = _make_current_user()
-        payload = PipelineStageTransitionRequest(stage="screening")
+        payload = PipelineStageTransitionRequest(stage="ai_interview")
 
         with patch(
             "app.services.pipeline_service._notify_stage_change",
@@ -271,4 +271,4 @@ class TestPipelineServiceTransitionStage:
             # Should NOT raise — notification is best-effort.
             svc.transition_stage(pipeline.id, pipeline.organization_id, user, payload)
 
-        assert pipeline.stage == "screening"
+        assert pipeline.stage == "ai_interview"

@@ -79,8 +79,8 @@ class TestSchemas:
 
     def test_stage_duration_entry_is_slow_default_false(self):
         dur = StageDurationEntry(
-            stage="screening",
-            label="Screening",
+            stage="ai_interview",
+            label="AI Interview",
             avg_days=3.5,
             median_days=3.0,
             sample_count=20,
@@ -133,9 +133,9 @@ class TestBuildResponseConversion:
             stage_durations_raw=stage_durations_raw or [],
         )
 
-    def test_100_pct_conversion_from_applied_to_screening(self):
-        matrix = {("applied", "screening"): 50}
-        dist = {"screening": 50}
+    def test_100_pct_conversion_from_applied_to_ai_interview(self):
+        matrix = {("applied", "ai_interview"): 50}
+        dist = {"ai_interview": 50}
         resp = self._call(matrix, dist)
         applied = next((f for f in resp.funnel if f.stage == "applied"), None)
         assert applied is not None
@@ -144,7 +144,7 @@ class TestBuildResponseConversion:
 
     def test_50_pct_conversion_with_rejections(self):
         matrix = {
-            ("applied", "screening"): 50,
+            ("applied", "ai_interview"): 50,
             ("applied", "rejected"): 50,
         }
         dist = {}
@@ -155,7 +155,7 @@ class TestBuildResponseConversion:
         assert applied.rejection_rate == 50.0
 
     def test_still_in_stage_counted_in_entered(self):
-        matrix = {("applied", "screening"): 40}
+        matrix = {("applied", "ai_interview"): 40}
         dist = {"applied": 10}  # 10 still sitting at applied
         resp = self._call(matrix, dist)
         applied = next(f for f in resp.funnel if f.stage == "applied")
@@ -205,16 +205,16 @@ class TestDropOffRanking:
 
     def test_highest_rejection_stage_is_bottleneck(self):
         matrix = {
-            ("applied", "screening"): 50,
+            ("applied", "ai_interview"): 50,
             ("applied", "rejected"): 10,     # 10/60 = 16.7%
-            ("screening", "interview"): 30,
-            ("screening", "rejected"): 30,   # 30/60 = 50% — bottleneck
+            ("ai_interview", "interview"): 30,
+            ("ai_interview", "rejected"): 30,   # 30/60 = 50% — bottleneck
         }
         dist = {}
         resp = self._call(matrix, dist)
         bottleneck = next((d for d in resp.drop_off if d.is_bottleneck), None)
         assert bottleneck is not None
-        assert bottleneck.stage == "screening"
+        assert bottleneck.stage == "ai_interview"
 
     def test_rank_1_is_highest_drop_off(self):
         matrix = {
@@ -228,8 +228,8 @@ class TestDropOffRanking:
         assert rank1.stage == "interview"
 
     def test_no_rejections_means_empty_drop_off(self):
-        matrix = {("applied", "screening"): 100}
-        resp = self._call(matrix, {"screening": 100})
+        matrix = {("applied", "ai_interview"): 100}
+        resp = self._call(matrix, {"ai_interview": 100})
         assert resp.drop_off == []
 
 
@@ -250,17 +250,17 @@ class TestStageDurations:
         )
 
     def test_avg_days_rounded_to_1dp(self):
-        resp = self._call([("screening", 5.678, None, 10)])
-        dur = next(d for d in resp.stage_durations if d.stage == "screening")
+        resp = self._call([("ai_interview", 5.678, None, 10)])
+        dur = next(d for d in resp.stage_durations if d.stage == "ai_interview")
         assert dur.avg_days == 5.7
 
     def test_slow_stage_flagged_above_1_25x_mean(self):
         # mean = (2 + 10) / 2 = 6.0; 1.25× = 7.5; interview at 10 → is_slow
         resp = self._call([
-            ("screening", 2.0, None, 5),
+            ("ai_interview", 2.0, None, 5),
             ("interview", 10.0, None, 5),
         ])
-        screening = next(d for d in resp.stage_durations if d.stage == "screening")
+        screening = next(d for d in resp.stage_durations if d.stage == "ai_interview")
         interview = next(d for d in resp.stage_durations if d.stage == "interview")
         assert interview.is_slow is True
         assert screening.is_slow is False

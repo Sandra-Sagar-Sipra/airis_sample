@@ -12,7 +12,6 @@ class PlacementOutcome(StrEnum):
 
     PENDING = "pending"
     APPLIED = "applied"
-    SCREENING = "screening"
     AI_SCREENING = "ai_screening"
     INTERVIEW = "interview"
     OFFER = "offer"

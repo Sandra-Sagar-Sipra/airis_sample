@@ -1,13 +1,23 @@
 "use client";
 
+/**
+ * AI Screening — Pipeline Queue
+ *
+ * Shows every pipeline entry currently in the "Screening" stage.
+ * Each row has a "Start Interview" button that navigates to the
+ * dedicated interview room at /ai-screenings/interview/{candidateId}.
+ *
+ * Data source: GET /api/v1/ai-screenings/pipeline-queue
+ * Records are NOT created manually — they auto-generate when a candidate
+ * enters the Screening pipeline stage.
+ */
+
 import { useCallback, useEffect, useState } from "react";
-import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   Brain,
-  Plus,
   RefreshCw,
   Search,
-  ChevronRight,
   CheckCircle2,
   Clock,
   AlertCircle,
@@ -15,329 +25,352 @@ import {
   Loader2,
   User,
   Briefcase,
-  BarChart3,
+  Building2,
+  Play,
+  Star,
+  Video,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { listScreenings } from "@/lib/api/ai_screening";
-import type { AIScreeningListItem, ScreeningStatus, ScreeningRecommendation } from "@/lib/api/types";
+import { Badge } from "@/components/ui/badge";
+import { Card, CardContent } from "@/components/ui/card";
+import {
+  getPipelineScreeningQueue,
+  type PipelineQueueEntry,
+} from "@/lib/api/ai_screening";
 import { cn } from "@/lib/utils";
 
-// ── Status helpers ────────────────────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
-function statusLabel(status: ScreeningStatus): string {
-  return {
-    pending: "Pending",
-    generating_questions: "Generating Questions",
-    questions_ready: "Questions Ready",
-    evaluating: "Evaluating",
-    completed: "Completed",
-    failed: "Failed",
-    cancelled: "Cancelled",
-  }[status] ?? status;
-}
+type InterviewStatus = PipelineQueueEntry["interview_status"];
 
-function StatusBadge({ status }: { status: ScreeningStatus }) {
-  const config: Record<ScreeningStatus, { color: string; icon: React.ElementType }> = {
-    pending: { color: "bg-gray-100 text-gray-700", icon: Clock },
-    generating_questions: { color: "bg-blue-100 text-blue-700", icon: Loader2 },
-    questions_ready: { color: "bg-yellow-100 text-yellow-700", icon: Clock },
-    evaluating: { color: "bg-purple-100 text-purple-700", icon: Loader2 },
-    completed: { color: "bg-green-100 text-green-700", icon: CheckCircle2 },
-    failed: { color: "bg-red-100 text-red-700", icon: XCircle },
-    cancelled: { color: "bg-gray-100 text-gray-500", icon: XCircle },
-  };
-  const { color, icon: Icon } = config[status] ?? { color: "bg-gray-100 text-gray-600", icon: AlertCircle };
-  const spinning = status === "generating_questions" || status === "evaluating";
+const STATUS_CONFIG: Record<
+  string,
+  { label: string; color: string; icon: React.ElementType }
+> = {
+  not_started: { label: "Not Started",  color: "bg-slate-100 text-slate-600",    icon: Clock },
+  pending:     { label: "Ready",        color: "bg-blue-100 text-blue-700",      icon: Clock },
+  in_progress: { label: "In Progress",  color: "bg-amber-100 text-amber-700",    icon: Loader2 },
+  completed:   { label: "Completed",    color: "bg-emerald-100 text-emerald-700",icon: CheckCircle2 },
+  incomplete:  { label: "Incomplete",   color: "bg-amber-100 text-amber-700",    icon: AlertCircle },
+  failed:      { label: "Failed",       color: "bg-red-100 text-red-600",        icon: XCircle },
+  cancelled:   { label: "Cancelled",    color: "bg-slate-100 text-slate-500",    icon: XCircle },
+};
 
+const REC_CONFIG: Record<string, { label: string; color: string }> = {
+  strong_hire: { label: "Strong Hire", color: "bg-emerald-100 text-emerald-800" },
+  hire:        { label: "Hire",        color: "bg-blue-100 text-blue-800" },
+  consider:    { label: "Consider",    color: "bg-amber-100 text-amber-800" },
+  reject:      { label: "Reject",      color: "bg-red-100 text-red-800" },
+};
+
+function StatusBadge({ status }: { status: string }) {
+  const cfg = STATUS_CONFIG[status] ?? STATUS_CONFIG.not_started;
+  const Icon = cfg.icon;
   return (
-    <span className={cn("inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium", color)}>
-      <Icon className={cn("w-3 h-3", spinning && "animate-spin")} />
-      {statusLabel(status)}
+    <span className={cn("inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium", cfg.color)}>
+      <Icon className={cn("h-3 w-3", status === "in_progress" && "animate-spin")} />
+      {cfg.label}
     </span>
   );
 }
 
-function RecommendationBadge({ rec }: { rec: ScreeningRecommendation | null }) {
-  if (!rec) return <span className="text-gray-400 text-xs">—</span>;
-  const config: Record<ScreeningRecommendation, { color: string; label: string }> = {
-    strong_proceed: { color: "bg-emerald-100 text-emerald-800", label: "Strong Proceed" },
-    proceed: { color: "bg-green-100 text-green-700", label: "Proceed" },
-    needs_manual_review: { color: "bg-yellow-100 text-yellow-700", label: "Manual Review" },
-    weak_match: { color: "bg-orange-100 text-orange-700", label: "Weak Match" },
-    reject_recommendation: { color: "bg-red-100 text-red-700", label: "Reject" },
-  };
-  const { color, label } = config[rec];
+function ScorePill({ score }: { score: number | null }) {
+  if (score == null) return <span className="text-slate-400 text-xs">—</span>;
+  const color = score >= 75 ? "text-emerald-600" : score >= 55 ? "text-amber-600" : "text-red-600";
   return (
-    <span className={cn("inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium", color)}>
-      {label}
+    <span className={cn("font-bold text-sm flex items-center gap-0.5", color)}>
+      <Star className="h-3 w-3" />
+      {score.toFixed(0)}
     </span>
   );
 }
 
-function ScoreBar({ score, label }: { score: number | null; label: string }) {
-  if (score === null) return <span className="text-gray-400 text-sm">—</span>;
-  const pct = Math.min(100, Math.max(0, score));
-  const color =
-    pct >= 75 ? "bg-emerald-500" : pct >= 55 ? "bg-yellow-400" : "bg-red-400";
+function ActionButton({
+  entry,
+  onStart,
+}: {
+  entry: PipelineQueueEntry;
+  onStart: (candidateId: string) => void;
+}) {
+  const s = entry.interview_status;
+
+  if (s === "completed") {
+    return (
+      <Button
+        size="sm"
+        variant="outline"
+        className="border-slate-300 text-slate-600 text-xs"
+        onClick={() => onStart(entry.candidate_id)}
+      >
+        View Report
+      </Button>
+    );
+  }
+
+  if (s === "in_progress") {
+    return (
+      <Button
+        size="sm"
+        className="bg-amber-500 hover:bg-amber-600 text-white text-xs gap-1"
+        onClick={() => onStart(entry.candidate_id)}
+      >
+        <Video className="h-3.5 w-3.5" />
+        Rejoin
+      </Button>
+    );
+  }
+
   return (
-    <div className="flex items-center gap-2">
-      <div className="flex-1 h-1.5 bg-gray-200 rounded-full overflow-hidden">
-        <div className={cn("h-full rounded-full", color)} style={{ width: `${pct}%` }} />
-      </div>
-      <span className="text-sm font-medium text-gray-700 tabular-nums w-8 text-right">
-        {Math.round(pct)}
-      </span>
-    </div>
+    <Button
+      size="sm"
+      className="bg-orange-500 hover:bg-orange-600 text-white text-xs gap-1"
+      onClick={() => onStart(entry.candidate_id)}
+    >
+      <Play className="h-3.5 w-3.5" />
+      Start Interview
+    </Button>
   );
 }
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function AIScreeningsPage() {
-  const [screenings, setScreenings] = useState<AIScreeningListItem[]>([]);
+  const router = useRouter();
+  const [queue, setQueue] = useState<PipelineQueueEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<string>("");
 
   const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
     try {
-      setError(null);
-      const data = await listScreenings({
-        status: statusFilter || undefined,
-        limit: 100,
-      });
-      setScreenings(data);
+      const data = await getPipelineScreeningQueue({ limit: 200 });
+      setQueue(data);
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Failed to load screenings");
+      setError(e instanceof Error ? e.message : "Failed to load screening queue");
     } finally {
       setLoading(false);
     }
-  }, [statusFilter]);
+  }, []);
 
-  useEffect(() => {
-    setLoading(true);
-    load();
-  }, [load]);
+  useEffect(() => { load(); }, [load]);
 
-  // Auto-refresh if any screening is in a transient state
-  useEffect(() => {
-    const hasTransient = screenings.some((s) =>
-      ["pending", "generating_questions", "evaluating"].includes(s.status)
-    );
-    if (!hasTransient) return;
-    const id = setInterval(load, 3000);
-    return () => clearInterval(id);
-  }, [screenings, load]);
-
-  const filtered = screenings.filter((s) => {
+  const filtered = queue.filter((e) => {
     if (!search) return true;
     const q = search.toLowerCase();
     return (
-      (s.candidate_name ?? "").toLowerCase().includes(q) ||
-      (s.candidate_email ?? "").toLowerCase().includes(q) ||
-      (s.job_title ?? "").toLowerCase().includes(q)
+      e.candidate_name.toLowerCase().includes(q) ||
+      (e.candidate_email ?? "").toLowerCase().includes(q) ||
+      (e.job_title ?? "").toLowerCase().includes(q) ||
+      (e.client_name ?? "").toLowerCase().includes(q)
     );
   });
 
-  const stats = {
-    total: screenings.length,
-    completed: screenings.filter((s) => s.status === "completed").length,
-    inProgress: screenings.filter((s) =>
-      ["pending", "generating_questions", "questions_ready", "evaluating"].includes(s.status)
-    ).length,
-    proceed: screenings.filter((s) =>
-      ["strong_proceed", "proceed"].includes(s.recommendation ?? "")
-    ).length,
+  const handleStart = (candidateId: string) => {
+    router.push(`/ai-screenings/interview/${candidateId}`);
   };
 
+  // Stats
+  const total     = queue.length;
+  const completed = queue.filter((e) => e.interview_status === "completed").length;
+  const inProg    = queue.filter((e) => e.interview_status === "in_progress").length;
+  const notStarted= queue.filter((e) => e.interview_status === "not_started" || e.interview_status === "pending").length;
+
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="p-6 max-w-7xl mx-auto space-y-6">
       {/* Header */}
-      <div className="bg-white border-b border-gray-200 px-6 py-4">
-        <div className="max-w-7xl mx-auto flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-lg bg-orange-100 flex items-center justify-center">
-              <Brain className="w-5 h-5 text-orange-600" />
-            </div>
-            <div>
-              <h1 className="text-xl font-semibold text-gray-900">AI Screenings</h1>
-              <p className="text-sm text-gray-500">AI-assisted candidate pre-screening</p>
-            </div>
-          </div>
-          <Button
-            className="bg-orange-600 hover:bg-orange-700 text-white gap-2"
-            onClick={() => {/* handled by candidate page — screenings are started from there */
-              window.location.href = "/candidates";
-            }}
-          >
-            <Plus className="w-4 h-4" />
-            New Screening
-          </Button>
-        </div>
-      </div>
-
-      <div className="max-w-7xl mx-auto px-6 py-6 space-y-6">
-        {/* Stats */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          {[
-            { label: "Total Screenings", value: stats.total, icon: BarChart3, color: "text-gray-600" },
-            { label: "Completed", value: stats.completed, icon: CheckCircle2, color: "text-green-600" },
-            { label: "In Progress", value: stats.inProgress, icon: Loader2, color: "text-blue-600" },
-            { label: "Recommended to Proceed", value: stats.proceed, icon: CheckCircle2, color: "text-emerald-600" },
-          ].map(({ label, value, icon: Icon, color }) => (
-            <Card key={label} className="border border-gray-200 shadow-none">
-              <CardContent className="pt-4 pb-3">
-                <div className="flex items-center gap-2 mb-1">
-                  <Icon className={cn("w-4 h-4", color)} />
-                  <span className="text-xs text-gray-500">{label}</span>
-                </div>
-                <p className="text-2xl font-bold text-gray-900">{value}</p>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-
-        {/* Filters */}
+      <div className="flex items-center justify-between flex-wrap gap-3">
         <div className="flex items-center gap-3">
-          <div className="relative flex-1 max-w-sm">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-            <Input
-              placeholder="Search by candidate or job..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="pl-9 h-9 bg-white border-gray-200"
-            />
+          <div className="w-10 h-10 rounded-lg bg-orange-100 flex items-center justify-center">
+            <Brain className="h-5 w-5 text-orange-600" />
           </div>
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-            className="h-9 px-3 text-sm border border-gray-200 rounded-md bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-orange-500"
-          >
-            <option value="">All statuses</option>
-            <option value="pending">Pending</option>
-            <option value="questions_ready">Questions Ready</option>
-            <option value="evaluating">Evaluating</option>
-            <option value="completed">Completed</option>
-            <option value="failed">Failed</option>
-          </select>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={load}
-            className="h-9 gap-1.5"
-          >
-            <RefreshCw className="w-3.5 h-3.5" />
-            Refresh
-          </Button>
-        </div>
-
-        {/* Table */}
-        {loading ? (
-          <div className="flex items-center justify-center py-16">
-            <Loader2 className="w-6 h-6 animate-spin text-orange-500" />
-          </div>
-        ) : error ? (
-          <Card className="border-red-200 bg-red-50">
-            <CardContent className="pt-4">
-              <p className="text-red-700 text-sm">{error}</p>
-            </CardContent>
-          </Card>
-        ) : filtered.length === 0 ? (
-          <div className="text-center py-16">
-            <Brain className="w-10 h-10 text-gray-300 mx-auto mb-3" />
-            <p className="text-gray-500 font-medium">No screenings found</p>
-            <p className="text-gray-400 text-sm mt-1">
-              Start a screening from a candidate profile to begin AI pre-screening.
+          <div>
+            <h1 className="text-2xl font-bold text-slate-900">AI Screenings</h1>
+            <p className="text-sm text-slate-500">
+              Candidates currently in the Screening pipeline stage
             </p>
           </div>
-        ) : (
-          <Card className="border border-gray-200 shadow-none overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-gray-100 bg-gray-50">
-                    <th className="text-left px-4 py-3 font-medium text-gray-600">Candidate</th>
-                    <th className="text-left px-4 py-3 font-medium text-gray-600">Job</th>
-                    <th className="text-left px-4 py-3 font-medium text-gray-600">Type</th>
-                    <th className="text-left px-4 py-3 font-medium text-gray-600">Status</th>
-                    <th className="text-left px-4 py-3 font-medium text-gray-600">Score</th>
-                    <th className="text-left px-4 py-3 font-medium text-gray-600">AI Recommendation</th>
-                    <th className="text-left px-4 py-3 font-medium text-gray-600">Decision</th>
-                    <th className="text-left px-4 py-3 font-medium text-gray-600">Date</th>
-                    <th className="px-4 py-3" />
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-50">
-                  {filtered.map((s) => (
-                    <tr
-                      key={s.id}
-                      className="hover:bg-gray-50 transition-colors"
-                    >
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-2">
-                          <div className="w-7 h-7 rounded-full bg-gray-200 flex items-center justify-center shrink-0">
-                            <User className="w-3.5 h-3.5 text-gray-500" />
-                          </div>
-                          <div className="min-w-0">
-                            <p className="font-medium text-gray-900 truncate">
-                              {s.candidate_name ?? "Unknown"}
-                            </p>
-                            <p className="text-xs text-gray-500 truncate">{s.candidate_email}</p>
-                          </div>
-                        </div>
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-1.5 text-gray-700">
-                          <Briefcase className="w-3.5 h-3.5 text-gray-400 shrink-0" />
-                          <span className="truncate max-w-[160px]">
-                            {s.job_title ?? <span className="text-gray-400">—</span>}
-                          </span>
-                        </div>
-                      </td>
-                      <td className="px-4 py-3">
-                        <span className="capitalize text-gray-700">
-                          {s.screening_type.replace("_", " ")}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3">
-                        <StatusBadge status={s.status} />
-                      </td>
-                      <td className="px-4 py-3 w-36">
-                        <ScoreBar score={s.overall_score} label="Overall" />
-                      </td>
-                      <td className="px-4 py-3">
-                        <RecommendationBadge rec={s.recommendation} />
-                      </td>
-                      <td className="px-4 py-3">
-                        {s.recruiter_decision ? (
-                          <span className="capitalize text-gray-700">
-                            {s.recruiter_decision}
-                          </span>
-                        ) : (
-                          <span className="text-gray-400 text-xs">Pending</span>
-                        )}
-                      </td>
-                      <td className="px-4 py-3 text-gray-500 whitespace-nowrap">
-                        {new Date(s.created_at).toLocaleDateString()}
-                      </td>
-                      <td className="px-4 py-3">
-                        <Link href={`/ai-screenings/${s.id}`}>
-                          <Button variant="ghost" size="sm" className="h-7 w-7 p-0">
-                            <ChevronRight className="w-4 h-4" />
-                          </Button>
-                        </Link>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </Card>
-        )}
+        </div>
+        <Button variant="outline" size="sm" onClick={load} disabled={loading}>
+          <RefreshCw className={cn("h-4 w-4 mr-1", loading && "animate-spin")} />
+          Refresh
+        </Button>
       </div>
+
+      {/* Stats strip */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        {[
+          { label: "In Screening",  value: total,      color: "text-slate-700" },
+          { label: "Not Started",   value: notStarted, color: "text-blue-600" },
+          { label: "In Progress",   value: inProg,     color: "text-amber-600" },
+          { label: "Completed",     value: completed,  color: "text-emerald-600" },
+        ].map(({ label, value, color }) => (
+          <Card key={label}>
+            <CardContent className="p-4">
+              <p className={cn("text-2xl font-bold", color)}>{value}</p>
+              <p className="text-xs text-slate-500 mt-0.5">{label}</p>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+
+      {/* Search */}
+      <div className="relative max-w-sm">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+        <Input
+          placeholder="Search candidate, job, client…"
+          className="pl-9"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+      </div>
+
+      {/* Hint */}
+      {!loading && queue.length === 0 && !error && (
+        <Card className="border-blue-100 bg-blue-50">
+          <CardContent className="p-4 text-sm text-blue-700">
+            <AlertCircle className="inline h-4 w-4 mr-1.5" />
+            No candidates are currently in the Screening stage. Move candidates from the
+            Pipeline to Screening to see them here.
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Error */}
+      {error && (
+        <Card className="border-red-200 bg-red-50">
+          <CardContent className="p-4 text-sm text-red-700">{error}</CardContent>
+        </Card>
+      )}
+
+      {/* Table */}
+      {loading ? (
+        <div className="flex justify-center py-16">
+          <Loader2 className="h-8 w-8 animate-spin text-slate-400" />
+        </div>
+      ) : filtered.length > 0 ? (
+        <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="bg-slate-50 border-b border-slate-200">
+                <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">
+                  Candidate
+                </th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">
+                  Job
+                </th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">
+                  Client
+                </th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">
+                  Stage
+                </th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">
+                  Interview
+                </th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">
+                  Score
+                </th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">
+                  Recommendation
+                </th>
+                <th className="text-right px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">
+                  Action
+                </th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {filtered.map((entry) => (
+                <tr key={entry.pipeline_id} className="hover:bg-slate-50 transition-colors">
+                  {/* Candidate */}
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-2">
+                      <div className="w-7 h-7 rounded-full bg-slate-100 flex items-center justify-center flex-shrink-0">
+                        <User className="h-3.5 w-3.5 text-slate-500" />
+                      </div>
+                      <div>
+                        <button
+                          className="font-medium text-slate-900 hover:text-orange-600 hover:underline text-left"
+                          onClick={() =>
+                            router.push(`/candidates/${entry.candidate_id}`)
+                          }
+                        >
+                          {entry.candidate_name}
+                        </button>
+                        <p className="text-xs text-slate-400">{entry.candidate_email}</p>
+                      </div>
+                    </div>
+                  </td>
+
+                  {/* Job */}
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-1.5 text-slate-700">
+                      <Briefcase className="h-3.5 w-3.5 text-slate-400 flex-shrink-0" />
+                      <span className="truncate max-w-[160px]">
+                        {entry.job_title ?? "—"}
+                      </span>
+                    </div>
+                  </td>
+
+                  {/* Client */}
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-1.5 text-slate-600">
+                      <Building2 className="h-3.5 w-3.5 text-slate-400 flex-shrink-0" />
+                      <span className="truncate max-w-[120px]">
+                        {entry.client_name ?? "—"}
+                      </span>
+                    </div>
+                  </td>
+
+                  {/* Pipeline Stage */}
+                  <td className="px-4 py-3">
+                    <Badge className="bg-slate-100 text-slate-700 border-0 capitalize text-xs">
+                      {entry.pipeline_stage}
+                    </Badge>
+                  </td>
+
+                  {/* Interview Status */}
+                  <td className="px-4 py-3">
+                    <StatusBadge status={entry.interview_status} />
+                  </td>
+
+                  {/* Score */}
+                  <td className="px-4 py-3">
+                    <ScorePill score={entry.overall_score} />
+                  </td>
+
+                  {/* Recommendation */}
+                  <td className="px-4 py-3">
+                    {entry.recommendation ? (
+                      <span
+                        className={cn(
+                          "inline-block px-2 py-0.5 rounded-full text-xs font-medium",
+                          REC_CONFIG[entry.recommendation]?.color ?? "bg-slate-100 text-slate-600"
+                        )}
+                      >
+                        {REC_CONFIG[entry.recommendation]?.label ?? entry.recommendation}
+                      </span>
+                    ) : (
+                      <span className="text-slate-400 text-xs">—</span>
+                    )}
+                  </td>
+
+                  {/* Action */}
+                  <td className="px-4 py-3 text-right">
+                    <ActionButton entry={entry} onStart={handleStart} />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : search ? (
+        <div className="text-center py-12 text-slate-500 text-sm">
+          No results for &ldquo;{search}&rdquo;
+        </div>
+      ) : null}
     </div>
   );
 }

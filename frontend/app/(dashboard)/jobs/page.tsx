@@ -14,9 +14,10 @@ import {
   writeCachedJobsList,
   type JobParseResult,
 } from "@/lib/api/jobs";
+import { listAllClients } from "@/lib/api/clients";
 import { JOBS_CREATE_PERMISSION, JOBS_UPDATE_PERMISSION, hasPermission } from "@/lib/rbac";
 import { isAdminRole } from "@/lib/dashboard-nav";
-import type { Job, JobStatus } from "@/lib/api/types";
+import type { Client, Job, JobStatus } from "@/lib/api/types";
 import { useAuthStore } from "@/store/auth-store";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -473,6 +474,14 @@ export default function JobsPage() {
   const [expMax, setExpMax] = useState("");
   const [employmentType, setEmploymentType] = useState("");
 
+  // Client options for selectors
+  const [clientOptions, setClientOptions] = useState<Client[]>([]);
+  useEffect(() => {
+    void listAllClients()
+      .then((all) => setClientOptions(all.filter((c) => !c.is_deleted)))
+      .catch(() => {});
+  }, []);
+
   // Edit form state
   const [showEdit, setShowEdit] = useState(false);
   const [editingJobId, setEditingJobId] = useState<string | null>(null);
@@ -702,6 +711,11 @@ export default function JobsPage() {
                 >
                   <div className="mb-3 flex items-start justify-between gap-3">
                     <div className="min-w-0 space-y-2">
+                      {job.client_name && (
+                        <p className="truncate text-[11px] font-semibold text-orange-500 uppercase tracking-wide">
+                          {job.client_name}
+                        </p>
+                      )}
                       <p className="truncate text-base font-bold text-slate-900 group-hover:text-[#FF5A1F] transition-colors duration-300">{job.title}</p>
                       <div className="flex flex-wrap items-center gap-2">
                         <span className={`inline-flex rounded-full px-2.5 py-0.5 text-[10px] font-bold tracking-wide uppercase ${getStatusBadgeClass(job.status)}`}>
@@ -772,6 +786,23 @@ export default function JobsPage() {
             </div>
             <div className="flex-1 overflow-y-auto p-6 space-y-6 text-sm">
               <div className="space-y-4">
+                {clientOptions.length > 0 && (
+                  <div>
+                    <label className="block text-xs font-medium text-slate-500 mb-1">Client</label>
+                    <select
+                      className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm bg-white focus:border-[#FF5A1F] focus:ring-1 focus:ring-[#FF5A1F]/30 focus:outline-none"
+                      value={clientId}
+                      onChange={(e) => setClientId(e.target.value)}
+                    >
+                      <option value="">— No change —</option>
+                      {clientOptions.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
                 <div>
                   <label className="block text-xs font-medium text-slate-500 mb-1">Title *</label>
                   <Input value={title} onChange={(e) => setTitle(e.target.value)} />
@@ -813,6 +844,7 @@ export default function JobsPage() {
                   const req = requiredSkills.split(/[\n,]+/g).map((s) => s.trim()).filter(Boolean);
                   const pref = preferredSkills.split(/[\n,]+/g).map((s) => s.trim()).filter(Boolean);
                   await updateJob(editingJobId, {
+                    ...(clientId.trim() ? { client_id: clientId.trim() } : {}),
                     title: title.trim(),
                     description: description.trim() || null,
                     location: location.trim() || undefined,

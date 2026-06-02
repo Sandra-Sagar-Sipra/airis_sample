@@ -26,6 +26,13 @@ class InviteResponse(BaseModel):
     opened_at: Optional[datetime] = None
     accepted_at: Optional[datetime] = None
     expired_at: Optional[datetime] = None
+    # F-INV-04: delivery tracking
+    delivery_status: str = "pending"
+    delivery_provider: Optional[str] = None
+    message_id: Optional[str] = None
+    delivery_attempts: int = 0
+    last_delivery_attempt_at: Optional[datetime] = None
+    last_delivery_error: Optional[str] = None
 
 
 class InviteCreateResponse(BaseModel):
@@ -46,6 +53,10 @@ class InviteListItem(BaseModel):
     opened_at: Optional[datetime] = None
     accepted_at: Optional[datetime] = None
     expired_at: Optional[datetime] = None
+    # F-INV-04: delivery tracking (summary only in list view)
+    delivery_status: str = "pending"
+    delivery_attempts: int = 0
+    last_delivery_attempt_at: Optional[datetime] = None
 
 
 class InviteResendResponse(BaseModel):
@@ -59,3 +70,15 @@ class InviteAcceptRequest(BaseModel):
 
 class InviteAcceptResponse(BaseModel):
     message: str
+
+
+# ── SMTP diagnostic ───────────────────────────────────────────────────────────
+
+class SmtpCheckResponse(BaseModel):
+    connected: bool
+    authenticated: bool
+    test_sent: bool
+    smtp_host: str
+    smtp_port: int
+    smtp_from: Optional[str]
+    error: Optional[str] = None

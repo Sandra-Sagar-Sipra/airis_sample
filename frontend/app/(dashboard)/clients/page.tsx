@@ -17,11 +17,17 @@ import type { Client, ClientCreatePayload } from "@/lib/api/types";
 
 const CLIENTS_CREATE_PERMISSION = "clients:create";
 const CLIENTS_DELETE_PERMISSION = "clients:delete";
+const CLIENTS_ASSIGN_PERMISSION = "clients:assign";
+const CLIENTS_UPDATE_PERMISSION = "clients:update";
 
 export default function ClientsPage() {
   const permissions = useAuthStore((s) => s.permissions);
   const canCreate = hasPermission(permissions, CLIENTS_CREATE_PERMISSION);
   const canDelete = hasPermission(permissions, CLIENTS_DELETE_PERMISSION);
+  // canAssign: true for admin (clients:assign) or any user with clients:update.
+  const canAssign =
+    hasPermission(permissions, CLIENTS_ASSIGN_PERMISSION) ||
+    hasPermission(permissions, CLIENTS_UPDATE_PERMISSION);
 
   const [clients, setClients] = useState<Client[]>([]);
   const [loading, setLoading] = useState(true);
@@ -118,6 +124,7 @@ export default function ClientsPage() {
           clients={clients}
           onArchive={canDelete ? setDeletingClient : undefined}
           canDelete={canDelete}
+          canAssign={canAssign}
         />
       )}
 

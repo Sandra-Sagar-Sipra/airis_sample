@@ -20,8 +20,8 @@ PLACEMENT_OUTCOMES = frozenset(
         "placed",
         "rejected",
         "applied",
-        "screening",
         "ai_screening",
+        "ai_interview",
         "interview",
         "offer",
     }
@@ -30,8 +30,8 @@ PLACEMENT_OUTCOMES = frozenset(
 # Pipeline stages recorded on transition_stage (pending still comes from job submit).
 TRACKED_PIPELINE_STAGE_OUTCOMES = frozenset(
     {
-        "screening",
         "ai_screening",
+        "ai_interview",
         "interview",
         "offer",
         "placed",
@@ -44,8 +44,8 @@ class CandidatePlacementHistory(Base):
     __tablename__ = "candidate_placement_history"
     __table_args__ = (
         sa.CheckConstraint(
-            "outcome IN ('pending', 'placed', 'rejected', 'applied', 'screening', "
-            "'ai_screening', 'interview', 'offer')",
+            "outcome IN ('pending', 'placed', 'rejected', 'applied', "
+            "'ai_screening', 'ai_interview', 'interview', 'offer')",
             name="ck_candidate_placement_history_outcome",
         ),
     )

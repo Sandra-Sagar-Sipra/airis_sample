@@ -235,7 +235,14 @@ class JobMatchCategoryScores(BaseModel):
     experience: int
     title: int
     education: int
+    # v2 weight categories (None for legacy records scored before this version)
+    communication: int | None = None
+    culture: int | None = None
+    breadth: int | None = None
     hybrid: HybridScoreBreakdown | None = None
+    # v2 debug fields stored in category_scores JSONB for transparency panel
+    skill_match_log: list[dict] | None = None
+    score_explanation: str | None = None
 
 
 class JobMatchEntry(BaseModel):
@@ -360,6 +367,7 @@ class JobResponse(BaseModel):
     id: UUID
     organization_id: UUID
     client_id: UUID | None = None
+    client_name: str | None = None  # Joined from clients table — never null in practice
     title: str
     description: str | None
     status: JobStatus | str  # permissive on output; strict validation is on input schemas

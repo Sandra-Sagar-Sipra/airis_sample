@@ -13,10 +13,13 @@ DELETE /ai-screenings/{id}         → delete screening
 """
 from __future__ import annotations
 
+import logging
 from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Query, status
+
+logger = logging.getLogger(__name__)
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -101,6 +104,241 @@ def list_screenings(
         limit=limit,
         offset=offset,
     )
+
+
+# ── Inline Pydantic models for live interview (defined here so they are
+#    available before /{screening_id} catches single-segment paths) ─────────────
+
+from pydantic import BaseModel as _BaseModel
+from typing import Optional as _Optional
+
+
+class LiveInterviewCreatePayload(_BaseModel):
+    candidate_id: UUID
+    job_id: _Optional[UUID] = None
+    max_questions: int = 15
+
+
+class LiveInterviewMessageSchema(_BaseModel):
+    id: str
+    role: str
+    content: str
+    sequence_number: int
+    question_number: _Optional[int] = None
+    is_followup: bool
+    created_at: str
+
+
+class LiveInterviewResponse(_BaseModel):
+    id: UUID
+    candidate_id: UUID
+    job_id: _Optional[UUID] = None
+    status: str
+    session_token: _Optional[str] = None
+    livekit_room_name: _Optional[str] = None
+    candidate_name_snapshot: _Optional[str] = None
+    job_title_snapshot: _Optional[str] = None
+    interview_mode: str = "async"
+    overall_score: _Optional[float] = None
+    recommendation: _Optional[str] = None
+    ai_summary: _Optional[str] = None
+    strengths: _Optional[list] = None
+    concerns: _Optional[list] = None
+    salary_expectation: _Optional[str] = None
+    notice_period: _Optional[str] = None
+    career_goals: _Optional[str] = None
+    key_projects_mentioned: _Optional[list] = None
+    communication_score: _Optional[float] = None
+    experience_score: _Optional[float] = None
+    confidence_score: _Optional[float] = None
+    culture_fit_score: _Optional[float] = None
+    duration_seconds: _Optional[int] = None
+    started_at: _Optional[str] = None
+    ended_at: _Optional[str] = None
+    created_at: str
+    messages: list[LiveInterviewMessageSchema] = []
+    # Completeness / incomplete reason
+    incomplete_reason: _Optional[str] = None
+
+    model_config = {"from_attributes": True}
+
+
+# ── Pipeline queue (must be before /{screening_id} to avoid UUID coercion 422) ─
+
+@router.get(
+    "/pipeline-queue",
+    summary="Candidates in the Screening stage with their AI interview status",
+)
+def get_pipeline_screening_queue(
+    db: Annotated[Session, Depends(get_db)],
+    _: Annotated[CurrentUser, Depends(require_permission(AI_SCREENING_READ))],
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+) -> list[dict]:
+    """Returns pipeline entries in the Screening stage joined with their live AI
+    screening record (if one exists). Primary data source for the AI Screening list page."""
+    svc = _svc(db)
+    org_id = UUID(current_user.organization_id)
+    return svc.get_pipeline_screening_queue(org_id, limit=limit, offset=offset)
+
+
+@router.get(
+    "/for-candidate/{candidate_id}",
+    response_model=LiveInterviewResponse,
+    summary="Get or create a live screening for a candidate in the Screening stage",
+)
+def get_or_create_candidate_screening(
+    candidate_id: UUID,
+    db: Annotated[Session, Depends(get_db)],
+    _: Annotated[CurrentUser, Depends(require_permission(AI_SCREENING_READ))],
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+) -> LiveInterviewResponse:
+    """Look up the live screening for a candidate in the Screening stage.
+    Auto-creates one if no record exists yet. Returns 404 if candidate
+    is not currently in the Screening stage."""
+    from fastapi import HTTPException
+
+    svc = _svc(db)
+    org_id = UUID(current_user.organization_id)
+    screening = svc.get_or_create_for_candidate(org_id, candidate_id)
+    if screening is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Candidate is not currently in the Screening stage.",
+        )
+    msgs = svc.get_live_messages(screening.id)
+    return _to_live_response(screening, msgs)
+
+
+# ── Live interview (before /{screening_id} so paths are not shadowed) ────────
+
+@router.post(
+    "/live",
+    response_model=LiveInterviewResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create a live AI screening interview session",
+)
+def create_live_interview(
+    payload: LiveInterviewCreatePayload,
+    db: Annotated[Session, Depends(get_db)],
+    _: Annotated[CurrentUser, Depends(require_permission(AI_SCREENING_CREATE))],
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+) -> LiveInterviewResponse:
+    """Create a live video interview session."""
+    svc = _svc(db)
+    org_id = UUID(current_user.organization_id)
+    screening = svc.create_live_interview(
+        org_id=org_id,
+        current_user=current_user,
+        candidate_id=payload.candidate_id,
+        job_id=payload.job_id,
+        max_questions=payload.max_questions,
+    )
+    return _to_live_response(screening, [])
+
+
+@router.get(
+    "/live/join/{token}",
+    response_model=LiveInterviewResponse,
+    summary="Candidate join — no auth required, token is the credential",
+)
+def get_live_interview_by_token(
+    token: str,
+    db: Annotated[Session, Depends(get_db)],
+) -> LiveInterviewResponse:
+    svc = _svc(db)
+    screening = svc.get_screening_by_token(token)
+    if screening is None:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Interview session not found or expired.")
+    msgs = svc.get_live_messages(screening.id)
+    return _to_live_response(screening, msgs)
+
+
+@router.get(
+    "/live/{screening_id}",
+    response_model=LiveInterviewResponse,
+    summary="Recruiter full live interview detail with transcript",
+)
+def get_live_interview(
+    screening_id: UUID,
+    db: Annotated[Session, Depends(get_db)],
+    _: Annotated[CurrentUser, Depends(require_permission(AI_SCREENING_READ))],
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+) -> LiveInterviewResponse:
+    svc = _svc(db)
+    org_id = UUID(current_user.organization_id)
+    screening = svc.get_screening(org_id, screening_id)
+    msgs = svc.get_live_messages(screening_id)
+    return _to_live_response(screening, msgs)
+
+
+@router.get(
+    "/live/{screening_id}/assemblyai-token",
+    summary="Return a temporary AssemblyAI realtime token for the candidate",
+)
+def get_assemblyai_token(
+    screening_id: UUID,
+    token: str,
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    """Generate a short-lived AssemblyAI realtime token (browser-side STT only)."""
+    import httpx
+    from fastapi import HTTPException
+    from app.core.config import get_settings
+
+    svc = _svc(db)
+    screening = svc.get_screening_by_token(token)
+    if screening is None or str(screening.id) != str(screening_id):
+        raise HTTPException(status_code=403, detail="Invalid session token.")
+
+    settings = get_settings()
+    api_key = settings.assemblyai_api_key
+    if not api_key:
+        logger.info("assemblyai_token.not_configured screening=%s", screening_id)
+        return {"token": None, "available": False}
+
+    token_urls = [
+        (
+            "https://streaming.assemblyai.com/v3/token",
+            "wss://streaming.assemblyai.com/v3/ws",
+        ),
+        (
+            "https://streaming.eu.assemblyai.com/v3/token",
+            "wss://streaming.eu.assemblyai.com/v3/ws",
+        ),
+    ]
+    for token_url, ws_url in token_urls:
+        try:
+            resp = httpx.get(
+                token_url,
+                headers={"Authorization": api_key},
+                params={"expires_in_seconds": 600},
+                timeout=10,
+            )
+            resp.raise_for_status()
+            token = resp.json().get("token")
+            if token:
+                logger.info(
+                    "assemblyai_token.generated screening=%s endpoint=%s",
+                    screening_id,
+                    token_url,
+                )
+                return {"token": token, "available": True, "ws_url": ws_url}
+            logger.warning(
+                "assemblyai_token.empty screening=%s endpoint=%s",
+                screening_id,
+                token_url,
+            )
+        except Exception as exc:
+            logger.warning(
+                "assemblyai_token.request_failed screening=%s endpoint=%s error=%s",
+                screening_id,
+                token_url,
+                exc,
+            )
+    return {"token": None, "available": False}
 
 
 # ── Detail ────────────────────────────────────────────────────────────────────
@@ -377,7 +615,11 @@ def move_pipeline_stage(
 # session (which will have been closed by the time the background task runs).
 
 def _run_generate_questions(*, org_id: UUID, screening_id: UUID, db_url: str) -> None:
+    from app.core.shutdown import is_shutting_down
     from app.db.session import SessionLocal
+
+    if is_shutting_down():
+        return
 
     db = SessionLocal()
     try:
@@ -387,10 +629,65 @@ def _run_generate_questions(*, org_id: UUID, screening_id: UUID, db_url: str) ->
 
 
 def _run_evaluation(*, org_id: UUID, screening_id: UUID, db_url: str) -> None:
+    from app.core.shutdown import is_shutting_down
     from app.db.session import SessionLocal
+
+    if is_shutting_down():
+        return
 
     db = SessionLocal()
     try:
         AIScreeningService(db).run_evaluation(org_id, screening_id)
     finally:
         db.close()
+
+
+def _to_live_response(screening, msgs: list) -> LiveInterviewResponse:
+    def _f(v):
+        try:
+            return float(v)
+        except Exception:
+            return None
+
+    return LiveInterviewResponse(
+        id=screening.id,
+        candidate_id=screening.candidate_id,
+        job_id=screening.job_id,
+        status=screening.status,
+        session_token=screening.session_token,
+        livekit_room_name=screening.livekit_room_name,
+        candidate_name_snapshot=screening.candidate_name_snapshot,
+        job_title_snapshot=screening.job_title_snapshot,
+        interview_mode=getattr(screening, "interview_mode", "async") or "async",
+        overall_score=_f(screening.overall_score),
+        recommendation=screening.recommendation,
+        ai_summary=screening.ai_summary,
+        strengths=screening.strengths,
+        concerns=screening.concerns,
+        salary_expectation=screening.salary_expectation,
+        notice_period=screening.notice_period,
+        career_goals=screening.career_goals,
+        key_projects_mentioned=screening.key_projects_mentioned,
+        communication_score=_f(screening.communication_score),
+        experience_score=_f(getattr(screening, "experience_score", None)),
+        confidence_score=_f(screening.confidence_score),
+        culture_fit_score=_f(getattr(screening, "culture_fit_score", None)),
+        duration_seconds=getattr(screening, "duration_seconds", None),
+        started_at=screening.started_at.isoformat() if getattr(screening, "started_at", None) else None,
+        ended_at=screening.ended_at.isoformat() if getattr(screening, "ended_at", None) else None,
+        created_at=screening.created_at.isoformat(),
+        incomplete_reason=getattr(screening, "incomplete_reason", None),
+        messages=[
+            LiveInterviewMessageSchema(
+                id=str(m.id),
+                role=m.role,
+                content=m.content,
+                sequence_number=m.sequence_number,
+                question_number=m.question_number,
+                is_followup=m.is_followup,
+                created_at=m.created_at.isoformat(),
+            )
+            for m in msgs
+        ],
+    )
+

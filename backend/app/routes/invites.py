@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import smtplib
 from datetime import UTC, datetime, timedelta
 import secrets
 from typing import Annotated
@@ -11,7 +12,6 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.celery_app import QUEUE_EMAIL
 from app.core.dependencies import get_current_user, get_user_permissions
 from app.core.permissions import USERS_INVITE
 from app.core.security import hash_password
@@ -33,8 +33,11 @@ from app.schemas.invite import (
     InviteListItem,
     InviteResendResponse,
     InviteResponse,
+    SmtpCheckResponse,
 )
+from app.services.email_service import send_invite_email_background
 from app.services.organization_role_service import get_role_id_by_key
+from app.services.task_runner import dispatch_task
 from app.tasks.email_tasks import send_invite_email_task
 
 logger = logging.getLogger(__name__)
@@ -61,13 +64,24 @@ def _require_invite_access(
     if role_key == "admin":
         return current_user
     if role_key == "vendor":
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden: vendor cannot manage users/roles.")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Forbidden: vendor cannot manage users/roles.",
+        )
 
-    permissions = get_user_permissions(db, current_user.organization_id, current_user.role, user_id=current_user.user_id)
+    permissions = get_user_permissions(
+        db, current_user.organization_id, current_user.role, user_id=current_user.user_id
+    )
     if USERS_INVITE in permissions:
         return current_user
 
-    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden: insufficient permissions.")
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Forbidden: insufficient permissions.",
+    )
+
+
+# ── Serialisation helpers ──────────────────────────────────────────────────────
 
 
 def _invite_to_list_item(invite: Invite) -> InviteListItem:
@@ -82,6 +96,10 @@ def _invite_to_list_item(invite: Invite) -> InviteListItem:
         opened_at=invite.opened_at,
         accepted_at=invite.accepted_at,
         expired_at=invite.expired_at,
+        # F-INV-04
+        delivery_status=getattr(invite, "delivery_status", "pending") or "pending",
+        delivery_attempts=getattr(invite, "delivery_attempts", 0) or 0,
+        last_delivery_attempt_at=getattr(invite, "last_delivery_attempt_at", None),
     )
 
 
@@ -98,7 +116,17 @@ def _invite_to_response(invite: Invite) -> InviteResponse:
         opened_at=invite.opened_at,
         accepted_at=invite.accepted_at,
         expired_at=invite.expired_at,
+        # F-INV-04
+        delivery_status=getattr(invite, "delivery_status", "pending") or "pending",
+        delivery_provider=getattr(invite, "delivery_provider", None),
+        message_id=getattr(invite, "message_id", None),
+        delivery_attempts=getattr(invite, "delivery_attempts", 0) or 0,
+        last_delivery_attempt_at=getattr(invite, "last_delivery_attempt_at", None),
+        last_delivery_error=getattr(invite, "last_delivery_error", None),
     )
+
+
+# ── Routes ─────────────────────────────────────────────────────────────────────
 
 
 @router.get("", response_model=list[InviteListItem])
@@ -126,14 +154,17 @@ def create_invite(
     normalized_email = str(payload.email).lower().strip()
     organization_id = UUID(current_user.organization_id)
 
-    existing_profile = db.scalar(select(Profile.id).where(func.lower(Profile.email) == normalized_email))
+    # ── Guard: user already exists ─────────────────────────────────────────────
+    existing_profile = db.scalar(
+        select(Profile.id).where(func.lower(Profile.email) == normalized_email)
+    )
     if existing_profile is not None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="User with this email already exists.",
         )
 
-    # Block duplicate active invites (sent or opened)
+    # ── Guard: active duplicate invite ────────────────────────────────────────
     active_invite = db.scalar(
         select(Invite.id).where(
             Invite.organization_id == organization_id,
@@ -147,6 +178,7 @@ def create_invite(
             detail="An active invite already exists for this email.",
         )
 
+    # ── Guard: role must exist for this org ───────────────────────────────────
     role_key = payload.role.strip().lower()
     if get_role_id_by_key(db, organization_id, role_key) is None:
         raise HTTPException(
@@ -154,6 +186,7 @@ def create_invite(
             detail="Invalid role for this organization.",
         )
 
+    # ── Create invite ─────────────────────────────────────────────────────────
     now = _now_utc()
     expires_at = now + timedelta(days=payload.expires_in_days)
     invite = Invite(
@@ -164,6 +197,9 @@ def create_invite(
         status=INVITE_STATUS_SENT,   # F-INV-05: lifecycle starts at 'sent'
         expires_at=expires_at,
         sent_at=now,                 # F-INV-05: record send timestamp
+        # F-INV-04: initial delivery state
+        delivery_status="pending",
+        delivery_attempts=0,
     )
     db.add(invite)
     try:
@@ -176,13 +212,25 @@ def create_invite(
         ) from None
     db.refresh(invite)
 
-    try:
-        send_invite_email_task.apply_async(
-            kwargs={"to_email": normalized_email, "token": invite.token},
-            queue=QUEUE_EMAIL,
-        )
-    except Exception:
-        logger.exception("Invite email task enqueue failed for %s; invite was still created.", normalized_email)
+    # ── Dispatch email off HTTP thread ────────────────────────────────────────
+    # apply_async blocks for 60 s when Redis is unreachable, killing the DB
+    # connection.  dispatch_task submits to a ThreadPoolExecutor and returns
+    # immediately.  Delivery status is written back to DB by the worker.
+    logger.info(
+        "invites.create.email_dispatch",
+        extra={"invite_id": str(invite.id), "email": normalized_email, "role": role_key},
+    )
+    dispatch_task(
+        task=send_invite_email_task,
+        fallback=send_invite_email_background,
+        kwargs={
+            "to_email": normalized_email,
+            "token": invite.token,
+            "role": role_key,
+            "expires_at_iso": invite.expires_at.isoformat(),
+            "invite_id": str(invite.id),
+        },
+    )
 
     return InviteCreateResponse(
         message="Invite created successfully.",
@@ -198,16 +246,15 @@ def open_invite(
 ) -> None:
     """F-INV-05: Mark an invite as 'opened' when the recipient visits the accept page.
 
-    Called by the frontend accept page on load. Idempotent — re-visiting the page
-    does not overwrite opened_at once already set. Returns 204 whether or not the
-    invite exists (prevents token enumeration).
+    Called by the frontend accept page on load. Idempotent — re-visiting the
+    page does not overwrite opened_at once already set. Returns 204 whether
+    or not the invite exists (prevents token enumeration).
     """
     invite = db.scalar(select(Invite).where(Invite.token == token))
     if invite is None or invite.status not in _ACTIVE_STATUSES:
         return  # Idempotent — don't reveal whether token exists
 
     if invite.expires_at < _now_utc():
-        # Lazily expire it here too
         invite.status = INVITE_STATUS_EXPIRED
         invite.expired_at = _now_utc()
         db.add(invite)
@@ -229,47 +276,79 @@ def resend_invite(
     _: Annotated[CurrentUser, Depends(_require_invite_access)],
     current_user: Annotated[CurrentUser, Depends(get_current_user)],
 ) -> InviteResendResponse:
-    organization_id = UUID(current_user.organization_id)
-    invite = db.scalar(
-        select(Invite).where(
-            Invite.id == invite_id,
-            Invite.organization_id == organization_id,
-        )
-    )
-    if invite is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invite not found.")
-    if invite.status == INVITE_STATUS_ACCEPTED:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Invite has already been accepted.")
-
-    now = _now_utc()
-    # Regenerate token and extend expiry if invite already expired.
-    if invite.expires_at < now or invite.status == INVITE_STATUS_EXPIRED:
-        invite.token = _generate_invite_token()
-        invite.expires_at = now + timedelta(days=7)
-
-    # Reset to 'sent' on resend so lifecycle restarts cleanly
-    invite.status = INVITE_STATUS_SENT
-    invite.sent_at = now
-    invite.opened_at = None   # clear previous open — resend resets the window
-
-    db.add(invite)
     try:
-        db.commit()
-    except IntegrityError:
-        db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Unable to resend invite due to token conflict.",
-        ) from None
-    db.refresh(invite)
+        organization_id = UUID(current_user.organization_id)
 
-    logger.info("Resending invite email", extra={"email": invite.email, "invite_id": str(invite.id)})
-    send_invite_email_task.apply_async(
-        kwargs={"to_email": invite.email, "token": invite.token},
-        queue=QUEUE_EMAIL,
-    )
+        logger.info(
+            "invites.resend.lookup",
+            extra={"invite_id": str(invite_id), "org_id": str(organization_id)},
+        )
+        invite = db.scalar(
+            select(Invite).where(
+                Invite.id == invite_id,
+                Invite.organization_id == organization_id,
+            )
+        )
+        if invite is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Invite not found."
+            )
+        if invite.status == INVITE_STATUS_ACCEPTED:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Invite has already been accepted.",
+            )
 
-    return InviteResendResponse(message="Invite resent successfully.")
+        now = _now_utc()
+        # Regenerate token and extend expiry when already expired
+        if invite.expires_at < now or invite.status == INVITE_STATUS_EXPIRED:
+            invite.token = _generate_invite_token()
+            invite.expires_at = now + timedelta(days=7)
+
+        # Reset lifecycle to 'sent'; reset delivery tracking for new attempt window
+        invite.status = INVITE_STATUS_SENT
+        invite.sent_at = now
+        invite.opened_at = None   # clear previous open — resend resets the window
+        invite.delivery_status = "pending"
+
+        db.add(invite)
+        logger.info(
+            "invites.resend.commit",
+            extra={"invite_id": str(invite_id), "email": invite.email},
+        )
+        try:
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Unable to resend invite due to token conflict.",
+            ) from None
+        db.refresh(invite)
+
+        logger.info(
+            "invites.resend.email_dispatch",
+            extra={"invite_id": str(invite_id), "email": invite.email},
+        )
+        dispatch_task(
+            task=send_invite_email_task,
+            fallback=send_invite_email_background,
+            kwargs={
+                "to_email": invite.email,
+                "token": invite.token,
+                "role": invite.role,
+                "expires_at_iso": invite.expires_at.isoformat(),
+                "invite_id": str(invite.id),
+            },
+        )
+
+        return InviteResendResponse(message="Invite resent successfully.")
+
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("invites.resend.failed", extra={"invite_id": str(invite_id)})
+        raise
 
 
 @router.post("/accept", response_model=InviteAcceptResponse)
@@ -279,15 +358,27 @@ def accept_invite(
 ) -> InviteAcceptResponse:
     invite = db.scalar(select(Invite).where(Invite.token == payload.token))
     if invite is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invite not found.")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Invite not found."
+        )
     if invite.status == INVITE_STATUS_ACCEPTED:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Invite has already been accepted.")
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Invite has already been accepted.",
+        )
     if invite.status == INVITE_STATUS_EXPIRED or invite.expires_at < _now_utc():
-        raise HTTPException(status_code=status.HTTP_410_GONE, detail="Invite has expired.")
+        raise HTTPException(
+            status_code=status.HTTP_410_GONE, detail="Invite has expired."
+        )
 
-    existing_profile = db.scalar(select(Profile.id).where(func.lower(Profile.email) == invite.email))
+    existing_profile = db.scalar(
+        select(Profile.id).where(func.lower(Profile.email) == invite.email)
+    )
     if existing_profile is not None:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="User already exists for this invite email.")
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="User already exists for this invite email.",
+        )
 
     role_key = invite.role.strip().lower()
     role_id = get_role_id_by_key(db, invite.organization_id, role_key)
@@ -306,7 +397,7 @@ def accept_invite(
         password_hash=hash_password(payload.password),
     )
     invite.status = INVITE_STATUS_ACCEPTED   # F-INV-05
-    invite.accepted_at = _now_utc()          # F-INV-05: record acceptance timestamp
+    invite.accepted_at = _now_utc()          # F-INV-05
 
     db.add(profile)
     db.add(invite)
@@ -320,3 +411,87 @@ def accept_invite(
         ) from None
 
     return InviteAcceptResponse(message="Invite accepted successfully.")
+
+
+# ── F-INV-04: SMTP diagnostic endpoint ────────────────────────────────────────
+
+
+@router.get(
+    "/smtp-check",
+    response_model=SmtpCheckResponse,
+    summary="Verify Brevo SMTP configuration (admin only)",
+)
+def smtp_check(
+    _: Annotated[CurrentUser, Depends(_require_invite_access)],
+    send_to: str | None = Query(
+        default=None,
+        description="If provided, send a test email to this address.",
+    ),
+) -> SmtpCheckResponse:
+    """Validate SMTP credentials and optionally send a test email.
+
+    Returns a structured response indicating whether the connection,
+    authentication, and (optionally) test-send each succeeded.
+    """
+    from app.core.config import get_settings
+
+    settings = get_settings()
+    result = SmtpCheckResponse(
+        connected=False,
+        authenticated=False,
+        test_sent=False,
+        smtp_host=settings.smtp_host,
+        smtp_port=settings.smtp_port,
+        smtp_from=settings.smtp_from,
+    )
+
+    if not settings.smtp_user or not settings.smtp_password or not settings.smtp_from:
+        result.error = (
+            "SMTP credentials incomplete: "
+            f"SMTP_USER={'set' if settings.smtp_user else 'MISSING'}, "
+            f"SMTP_PASSWORD={'set' if settings.smtp_password else 'MISSING'}, "
+            f"SMTP_FROM={settings.smtp_from or 'MISSING'}"
+        )
+        logger.warning("invites.smtp_check.credentials_incomplete", extra={"error": result.error})
+        return result
+
+    try:
+        with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=15) as server:
+            server.ehlo()
+            result.connected = True
+
+            server.starttls()
+            server.ehlo()
+
+            server.login(settings.smtp_user, settings.smtp_password)
+            result.authenticated = True
+
+            if send_to:
+                from email.message import EmailMessage
+                msg = EmailMessage()
+                msg["Subject"] = "[AIRIS] SMTP configuration test"
+                msg["From"] = settings.smtp_from
+                msg["To"] = send_to
+                msg.set_content(
+                    "This is an automated SMTP configuration test from AIRIS.\n"
+                    "If you received this email, Brevo SMTP delivery is working correctly."
+                )
+                refused = server.send_message(msg)
+                if refused:
+                    result.error = f"SMTP refused recipient: {refused}"
+                    logger.warning("invites.smtp_check.send_refused", extra={"refused": str(refused)})
+                else:
+                    result.test_sent = True
+                    logger.info("invites.smtp_check.test_sent", extra={"to": send_to})
+
+    except smtplib.SMTPAuthenticationError as exc:
+        result.error = f"Authentication failed: {exc.smtp_error!r}"
+        logger.error("invites.smtp_check.auth_failed", extra={"error": result.error})
+    except smtplib.SMTPConnectError as exc:
+        result.error = f"Connection failed: {exc}"
+        logger.error("invites.smtp_check.connect_failed", extra={"error": result.error})
+    except Exception as exc:
+        result.error = str(exc)
+        logger.exception("invites.smtp_check.unexpected_error")
+
+    return result

@@ -19,6 +19,17 @@ from app.schemas.placement_history import CandidatePlacementListResponse, Candid
 logger = logging.getLogger(__name__)
 
 
+_OUTCOME_ALIASES: dict[str, str] = {
+    # Legacy stage name kept in pipeline enums; DB constraint now uses ai_screening.
+    "ai_interview": "ai_screening",
+}
+
+
+def _normalize_outcome(value: str | None) -> str:
+    normalized = (value or "").strip().lower()
+    return _OUTCOME_ALIASES.get(normalized, normalized)
+
+
 class PlacementHistoryService:
     """
     Append-only placement history (AIR-37 / AIR-504).
@@ -52,13 +63,14 @@ class PlacementHistoryService:
         outcome: str,
         placement_date: datetime | None = None,
     ) -> CandidatePlacementHistory:
-        if outcome not in PLACEMENT_OUTCOMES:
+        normalized = _normalize_outcome(outcome)
+        if normalized not in PLACEMENT_OUTCOMES:
             raise ValueError(f"Invalid placement outcome: {outcome}")
         when = placement_date or datetime.now(UTC)
         row = CandidatePlacementHistory(
             candidate_id=candidate_id,
             job_id=job_id,
-            outcome=outcome,
+            outcome=normalized,
             placement_date=when,
         )
         self.db.add(row)
@@ -107,7 +119,7 @@ class PlacementHistoryService:
         transitioned_at: datetime | None = None,
     ) -> CandidatePlacementHistory | None:
         """Append a pipeline stage row; skips duplicate consecutive outcomes for same job."""
-        normalized = (stage or "").strip().lower()
+        normalized = _normalize_outcome(stage)
         if normalized not in TRACKED_PIPELINE_STAGE_OUTCOMES:
             return None
         if self._latest_outcome_for_job(candidate_id=candidate_id, job_id=job_id) == normalized:
@@ -187,7 +199,7 @@ class PlacementHistoryService:
         for pipeline, job_title in self.db.execute(stmt).all():
             if pipeline.job_id in jobs_with_rows:
                 continue
-            normalized = (pipeline.stage or "").strip().lower()
+            normalized = _normalize_outcome(pipeline.stage)
             if normalized not in PLACEMENT_OUTCOMES:
                 continue
             try:
@@ -230,7 +242,7 @@ class PlacementHistoryService:
             .order_by(PipelineStageHistory.transitioned_at.desc())
         )
         for history_row, job_id, job_title in self.db.execute(stmt).all():
-            normalized = (history_row.new_stage or "").strip().lower()
+            normalized = _normalize_outcome(history_row.new_stage)
             if normalized not in PLACEMENT_OUTCOMES:
                 continue
             key = (job_id, normalized)
@@ -282,7 +294,7 @@ class PlacementHistoryService:
         items: list[CandidatePlacementResponse] = []
         for history_row, job_title in rows:
             try:
-                outcome = PlacementOutcome(history_row.outcome)
+                outcome = PlacementOutcome(_normalize_outcome(history_row.outcome))
             except ValueError:
                 logger.warning(
                     "placement_history.skipped_unknown_outcome",

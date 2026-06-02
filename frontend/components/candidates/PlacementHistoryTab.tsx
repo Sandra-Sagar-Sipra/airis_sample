@@ -11,8 +11,7 @@ import { cn } from "@/lib/utils";
 const OUTCOME_LABEL: Record<PlacementOutcome, string> = {
   pending: "Pending",
   applied: "Applied",
-  screening: "Screening",
-  ai_screening: "AI Screening",
+  ai_interview: "AI Interview",
   interview: "Interview",
   offer: "Offered",
   placed: "Hired",
@@ -22,8 +21,7 @@ const OUTCOME_LABEL: Record<PlacementOutcome, string> = {
 const OUTCOME_CLASS: Record<PlacementOutcome, string> = {
   pending: "bg-amber-50 text-amber-700 border-amber-200",
   applied: "bg-violet-50 text-violet-700 border-violet-200",
-  screening: "bg-blue-50 text-blue-700 border-blue-200",
-  ai_screening: "bg-orange-50 text-orange-700 border-orange-200",
+  ai_interview: "bg-orange-50 text-orange-700 border-orange-200",
   interview: "bg-emerald-50 text-emerald-700 border-emerald-200",
   offer: "bg-yellow-50 text-yellow-800 border-yellow-200",
   placed: "bg-emerald-50 text-emerald-800 border-emerald-300",

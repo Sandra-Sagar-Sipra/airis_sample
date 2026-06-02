@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from concurrent.futures import Future
 from datetime import UTC, datetime
 from uuid import UUID
 
@@ -39,17 +40,40 @@ logger = logging.getLogger(__name__)
 # a thread pool) cannot directly await coroutines, so they use
 # asyncio.run_coroutine_threadsafe() to schedule WS pushes on the main loop.
 _main_event_loop: asyncio.AbstractEventLoop | None = None
+_pending_ws_notifications: set[Future] = set()
 
 
 def _notify_ws_from_thread(interview_id: UUID, event_type: object, data: dict) -> None:
     """Fire-and-forget: schedule a WS broadcast from a sync background thread."""
+    from app.core.shutdown import is_shutting_down
+
+    if is_shutting_down():
+        return
     if _main_event_loop is None or _main_event_loop.is_closed():
         return
     from app.websocket.copilot_ws import notify_interview_clients
-    asyncio.run_coroutine_threadsafe(
+
+    fut = asyncio.run_coroutine_threadsafe(
         notify_interview_clients(str(interview_id), event_type, data),  # type: ignore[arg-type]
         _main_event_loop,
     )
+    _pending_ws_notifications.add(fut)
+
+    def _done(f: Future) -> None:
+        _pending_ws_notifications.discard(f)
+        try:
+            f.result()
+        except Exception:
+            pass
+
+    fut.add_done_callback(_done)
+
+
+def cancel_pending_ws_notifications() -> None:
+    """Cancel in-flight copilot WS notifications during shutdown."""
+    for fut in list(_pending_ws_notifications):
+        fut.cancel()
+    _pending_ws_notifications.clear()
 
 
 def _copilot_guard() -> None:

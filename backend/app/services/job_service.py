@@ -15,6 +15,8 @@ from sqlalchemy import Select, or_, select, text
 from sqlalchemy.exc import IntegrityError, ProgrammingError
 from sqlalchemy.orm import Session
 
+from app.models.client import Client
+from app.models.client_recruiter_assignment import ClientRecruiterAssignment
 from app.models.job import Job
 from app.models.candidate import Candidate
 from app.models.candidate_job_match import CandidateJobMatch
@@ -183,6 +185,7 @@ class JobService:
         job: Job,
         *,
         _skills_map: "dict[UUID, tuple[list[str], list[str]]] | None" = None,
+        _client_name: "str | None" = None,
         list_mode: bool = False,
     ) -> JobResponse:
         """Helper to construct JobResponse including skills.
@@ -218,11 +221,22 @@ class JobService:
         else:
             safe_status = raw_status  # pass through unknown values; schema is permissive
 
+        # Resolve client name — use passed value (bulk mode) or query DB (single-job mode).
+        resolved_client_name = _client_name
+        if resolved_client_name is None and job.client_id is not None:
+            try:
+                resolved_client_name = self.db.scalar(
+                    select(Client.name).where(Client.id == job.client_id)
+                )
+            except Exception:
+                pass
+
         _now = datetime.now(timezone.utc)
         return JobResponse(
             id=job.id,
             organization_id=job.organization_id,
             client_id=job.client_id,
+            client_name=resolved_client_name,
             title=job.title or "",
             description=None if list_mode else job.description,
             status=safe_status,
@@ -251,7 +265,6 @@ class JobService:
         )
 
     def get_or_create_default_client(self, organization_id: UUID):
-        from app.models.client import Client
         client = self.db.scalars(
             select(Client).where(Client.organization_id == organization_id, Client.name == "Default Client")
         ).first()
@@ -482,6 +495,41 @@ class JobService:
             stmt = stmt.where(Job.client_id == client_id)
         if self._scope.is_scoped_user(current_user):
             stmt = stmt.where(Job.id.in_(self._scope.allowed_job_ids_subquery(current_user)))
+        elif (current_user.role or "").lower() == "recruiter":
+            # Scope recruiter to only clients they are assigned to.
+            # If the recruiter has no assignments, fall back to all org jobs.
+            # If they have assignments, show: assigned-client jobs + "Default Client" orphan jobs
+            # (the Default Client is auto-created for jobs created without a client; this ensures
+            # recruiters can still see and manage legacy jobs during the transition period).
+            recruiter_id = UUID(current_user.user_id)
+            has_assignments = self.db.scalar(
+                select(sa.func.count()).select_from(ClientRecruiterAssignment).where(
+                    ClientRecruiterAssignment.recruiter_id == recruiter_id
+                )
+            ) or 0
+            if has_assignments > 0:
+                assigned_client_ids_sq = (
+                    select(ClientRecruiterAssignment.client_id)
+                    .where(ClientRecruiterAssignment.recruiter_id == recruiter_id)
+                    .scalar_subquery()
+                )
+                # Also include jobs on the "Default Client" (orphan jobs not yet reassigned).
+                default_client_id_sq = (
+                    select(Client.id)
+                    .where(
+                        Client.organization_id == organization_id,
+                        Client.name == "Default Client",
+                        Client.is_deleted.is_(False),
+                    )
+                    .limit(1)
+                    .scalar_subquery()
+                )
+                stmt = stmt.where(
+                    sa.or_(
+                        Job.client_id.in_(assigned_client_ids_sq),
+                        Job.client_id == default_client_id_sq,
+                    )
+                )
         stmt = stmt.order_by(Job.created_at.desc()).offset(offset).limit(limit)
         jobs = list(self.db.scalars(stmt))
         if not jobs:
@@ -496,10 +544,22 @@ class JobService:
                 (skills_map[s.job_id][0] if s.is_required else skills_map[s.job_id][1]).append(s.skill)
         except Exception:
             logger.warning("list_jobs.skills_batch_failed — falling back to per-job loads")
+        # Batch-load client names to avoid N+1 queries.
+        client_ids = list({j.client_id for j in jobs if j.client_id is not None})
+        client_name_map: dict[UUID, str] = {}
+        if client_ids:
+            try:
+                for row in self.db.execute(
+                    select(Client.id, Client.name).where(Client.id.in_(client_ids))
+                ):
+                    client_name_map[row.id] = row.name
+            except Exception:
+                logger.warning("list_jobs.client_names_batch_failed")
         results: list[JobResponse] = []
         for job in jobs:
             try:
-                results.append(self._get_job_response(job, _skills_map=skills_map, list_mode=True))
+                cname = client_name_map.get(job.client_id) if job.client_id else None
+                results.append(self._get_job_response(job, _skills_map=skills_map, _client_name=cname, list_mode=True))
             except Exception as e:
                 logger.warning("list_jobs.skip_bad_job", extra={"job_id": str(job.id), "error": str(e)})
         return results
@@ -839,6 +899,35 @@ class JobService:
 
         if self._scope.is_scoped_user(current_user):
             stmt = stmt.where(Job.id.in_(self._scope.allowed_job_ids_subquery(current_user)))
+        elif (current_user.role or "").lower() == "recruiter":
+            recruiter_id = UUID(current_user.user_id)
+            has_assignments = self.db.scalar(
+                select(sa.func.count()).select_from(ClientRecruiterAssignment).where(
+                    ClientRecruiterAssignment.recruiter_id == recruiter_id
+                )
+            ) or 0
+            if has_assignments > 0:
+                assigned_client_ids_sq = (
+                    select(ClientRecruiterAssignment.client_id)
+                    .where(ClientRecruiterAssignment.recruiter_id == recruiter_id)
+                    .scalar_subquery()
+                )
+                default_client_id_sq = (
+                    select(Client.id)
+                    .where(
+                        Client.organization_id == organization_id,
+                        Client.name == "Default Client",
+                        Client.is_deleted.is_(False),
+                    )
+                    .limit(1)
+                    .scalar_subquery()
+                )
+                stmt = stmt.where(
+                    sa.or_(
+                        Job.client_id.in_(assigned_client_ids_sq),
+                        Job.client_id == default_client_id_sq,
+                    )
+                )
 
         # Urgency-first sorting when urgency filtering is used; else use newest first.
         if urgency is not None or status_filter is not None or location is not None or skills:
@@ -855,7 +944,21 @@ class JobService:
 
         stmt = stmt.offset(offset).limit(limit)
         jobs = list(self.db.scalars(stmt))
-        return [self._get_job_response(job) for job in jobs]
+        if not jobs:
+            return []
+        # Batch-load client names.
+        client_ids = list({j.client_id for j in jobs if j.client_id is not None})
+        client_name_map: dict[UUID, str] = {}
+        if client_ids:
+            try:
+                for row in self.db.execute(select(Client.id, Client.name).where(Client.id.in_(client_ids))):
+                    client_name_map[row.id] = row.name
+            except Exception:
+                pass
+        return [
+            self._get_job_response(job, _client_name=client_name_map.get(job.client_id) if job.client_id else None)
+            for job in jobs
+        ]
 
     # -------------------------------
     # Job submissions
@@ -1752,24 +1855,61 @@ class JobService:
                     "preferred_skills_count": len(preferred_skills),
                 },
             )
+            # Extended blob: include parsed resume summary so candidates with a blank
+            # experience_summary still get their skills scanned from the rich profile text.
+            parsed_summary_text: str = str(extra.get("summary") or "")
             candidate_blob = " ".join(
                 [
                     (candidate.experience_summary or ""),
                     (candidate.education or ""),
                     (candidate.notes or ""),
                     (candidate.location or ""),
+                    parsed_summary_text,
                 ]
             ).lower()
+
+            # Broad BASELINE_SKILLS scan catches skills in the summary that are absent
+            # from a stale parsed_resume_data.skills list (pre-BASELINE_SKILLS expansion).
+            import re as _re
+            from app.services.ats_extraction_service import BASELINE_SKILLS as _BASELINE_SKILLS
+            _blob_seen: set[str] = set()
+            blob_skills: list[str] = []
+            for _sk in sorted(_BASELINE_SKILLS, key=lambda s: (-len(s), s)):
+                _ns = self._jd_normalizer.normalize_skill(_sk)
+                if not _ns or _ns in _blob_seen:
+                    continue
+                if _re.search(rf"(?<![a-z0-9+#]){_re.escape(_sk)}(?![a-z0-9+#])", candidate_blob, _re.IGNORECASE):
+                    _blob_seen.add(_ns)
+                    blob_skills.append(_ns)
+
             candidate_skill_hits: list[str] = []
             for skill in set(required_skills + preferred_skills):
                 norm = self._jd_normalizer.normalize_skill(skill)
                 if norm and norm in candidate_blob:
                     candidate_skill_hits.append(norm)
+
+            # Years: experience_summary → DB column → parsed summary text.
             years = self._extract_years_from_text(candidate.experience_summary)
+            if years is None:
+                raw_y = extra.get("years")
+                if raw_y is not None:
+                    try:
+                        years = float(raw_y)
+                    except (TypeError, ValueError):
+                        pass
+            if years is None and parsed_summary_text:
+                years = self._extract_years_from_text(parsed_summary_text)
+
+            # Titles: experience_summary → parsed_resume_data titles (real titles only).
             previous_titles = self._extract_titles_from_text(candidate.experience_summary or "")
+            if not previous_titles:
+                raw_titles = self._extra_str_list(extra, "titles")
+                previous_titles = [t for t in raw_titles if t and len(t.strip()) <= 80][:5]
+
             candidate_skills_for_scoring = list(
                 dict.fromkeys(
-                    [s for s in candidate_skill_hits if s]
+                    blob_skills
+                    + [s for s in candidate_skill_hits if s]
                     + self._extra_str_list(extra, "skills")
                 )
             )
@@ -1799,6 +1939,11 @@ class JobService:
             det_score = result.match_score
             now = datetime.now(timezone.utc)
             category_scores: dict[str, Any] = dict(result.category_scores or {})
+            # Store v2 debug transparency data in the JSONB blob.
+            if result.skill_match_log:
+                category_scores["skill_match_log"] = result.skill_match_log
+            if result.score_explanation:
+                category_scores["score_explanation"] = result.score_explanation
             category_scores["hybrid"] = {
                 "deterministic_score": det_score,
                 "semantic_score": None,
@@ -2049,24 +2194,50 @@ class JobService:
                     "preferred_skills_count": len(preferred_skills),
                 },
             )
+            _parsed_summary_text2: str = str(extra.get("summary") or "")
             candidate_blob = " ".join(
                 [
                     (candidate.experience_summary or ""),
                     (candidate.education or ""),
                     (candidate.notes or ""),
                     (candidate.location or ""),
+                    _parsed_summary_text2,
                 ]
             ).lower()
+            import re as _re2
+            from app.services.ats_extraction_service import BASELINE_SKILLS as _BASELINE_SKILLS2
+            _blob_seen2: set[str] = set()
+            blob_skills2: list[str] = []
+            for _sk2 in sorted(_BASELINE_SKILLS2, key=lambda s: (-len(s), s)):
+                _ns2 = self._jd_normalizer.normalize_skill(_sk2)
+                if not _ns2 or _ns2 in _blob_seen2:
+                    continue
+                if _re2.search(rf"(?<![a-z0-9+#]){_re2.escape(_sk2)}(?![a-z0-9+#])", candidate_blob, _re2.IGNORECASE):
+                    _blob_seen2.add(_ns2)
+                    blob_skills2.append(_ns2)
             candidate_skill_hits: list[str] = []
             for skill in set(required_skills + preferred_skills):
                 norm = self._jd_normalizer.normalize_skill(skill)
                 if norm and norm in candidate_blob:
                     candidate_skill_hits.append(norm)
             years = self._extract_years_from_text(candidate.experience_summary)
+            if years is None:
+                raw_y2 = extra.get("years")
+                if raw_y2 is not None:
+                    try:
+                        years = float(raw_y2)
+                    except (TypeError, ValueError):
+                        pass
+            if years is None and _parsed_summary_text2:
+                years = self._extract_years_from_text(_parsed_summary_text2)
             previous_titles = self._extract_titles_from_text(candidate.experience_summary or "")
+            if not previous_titles:
+                raw_titles2 = self._extra_str_list(extra, "titles")
+                previous_titles = [t for t in raw_titles2 if t and len(t.strip()) <= 80][:5]
             candidate_skills_for_scoring = list(
                 dict.fromkeys(
-                    [s for s in candidate_skill_hits if s]
+                    blob_skills2
+                    + [s for s in candidate_skill_hits if s]
                     + self._extra_str_list(extra, "skills")
                 )
             )
@@ -2277,26 +2448,52 @@ class JobService:
                     select(JobSkill.skill).where(JobSkill.job_id == job.id, JobSkill.is_required.is_(False))
                 )
             )
+            _parsed_summary_text3: str = str(extra.get("summary") or "")
             candidate_blob = " ".join(
                 [
                     (candidate.experience_summary or ""),
                     (candidate.education or ""),
                     (candidate.notes or ""),
                     (candidate.location or ""),
+                    _parsed_summary_text3,
                 ]
             ).lower()
+            import re as _re3
+            from app.services.ats_extraction_service import BASELINE_SKILLS as _BASELINE_SKILLS3
+            _blob_seen3: set[str] = set()
+            blob_skills3: list[str] = []
+            for _sk3 in sorted(_BASELINE_SKILLS3, key=lambda s: (-len(s), s)):
+                _ns3 = self._jd_normalizer.normalize_skill(_sk3)
+                if not _ns3 or _ns3 in _blob_seen3:
+                    continue
+                if _re3.search(rf"(?<![a-z0-9+#]){_re3.escape(_sk3)}(?![a-z0-9+#])", candidate_blob, _re3.IGNORECASE):
+                    _blob_seen3.add(_ns3)
+                    blob_skills3.append(_ns3)
             candidate_skill_hits: list[str] = []
             for skill in set(required_skills + preferred_skills):
                 norm = self._jd_normalizer.normalize_skill(skill)
                 if norm and norm in candidate_blob:
                     candidate_skill_hits.append(norm)
             years = self._extract_years_from_text(candidate.experience_summary)
+            if years is None:
+                raw_y3 = extra.get("years")
+                if raw_y3 is not None:
+                    try:
+                        years = float(raw_y3)
+                    except (TypeError, ValueError):
+                        pass
+            if years is None and _parsed_summary_text3:
+                years = self._extract_years_from_text(_parsed_summary_text3)
             previous_titles = self._extract_titles_from_text(candidate.experience_summary or "")
+            if not previous_titles:
+                raw_titles3 = self._extra_str_list(extra, "titles")
+                previous_titles = [t for t in raw_titles3 if t and len(t.strip()) <= 80][:5]
             # Build a richer skill set for deterministic scoring by combining
             # blob hits with structured extracted skills (when available).
             candidate_skills_for_scoring = list(
                 dict.fromkeys(
-                    [s for s in candidate_skill_hits if s]
+                    blob_skills3
+                    + [s for s in candidate_skill_hits if s]
                     + self._extra_str_list(extra, "skills")
                 )
             )
@@ -2711,13 +2908,24 @@ class JobService:
                 hybrid = HybridScoreBreakdown.model_validate(raw_h)
             except Exception:  # noqa: BLE001 — invalid legacy blobs must not 500 list endpoints
                 hybrid = None
+        # v2 debug fields
+        raw_log = cs.get("skill_match_log")
+        skill_match_log: list[dict] | None = raw_log if isinstance(raw_log, list) else None
+        score_explanation = cs.get("score_explanation")
+        score_explanation_str: str | None = score_explanation if isinstance(score_explanation, str) else None
+
         return JobMatchCategoryScores(
             required_skills=JobService._category_json_int(cs.get("required_skills")),
             preferred_skills=JobService._category_json_int(cs.get("preferred_skills")),
             experience=JobService._category_json_int(cs.get("experience")),
             title=JobService._category_json_int(cs.get("title")),
             education=JobService._category_json_int(cs.get("education")),
+            communication=JobService._category_json_int(cs.get("communication")) if cs.get("communication") is not None else None,
+            culture=JobService._category_json_int(cs.get("culture")) if cs.get("culture") is not None else None,
+            breadth=JobService._category_json_int(cs.get("breadth")) if cs.get("breadth") is not None else None,
             hybrid=hybrid,
+            skill_match_log=skill_match_log,
+            score_explanation=score_explanation_str,
         )
 
     @staticmethod

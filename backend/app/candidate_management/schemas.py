@@ -29,7 +29,7 @@ class CandidateStatusSchema(str, Enum):
 
 class CandidateStageSchema(str, Enum):
     APPLIED = "applied"
-    SCREENING = "screening"
+    AI_INTERVIEW = "ai_interview"
     SHORTLISTED = "shortlisted"
     INTERVIEW = "interview"
     OFFERED = "offered"
@@ -224,7 +224,7 @@ class CandidateResponse(BaseModel):
             return "applied"
         val = str(value).strip().lower()
         if val == "shortlisted":
-            return "screening"
+            return "ai_interview"
         valid_stages = {e.value for e in CandidateStageSchema}
         if val in valid_stages:
             return val

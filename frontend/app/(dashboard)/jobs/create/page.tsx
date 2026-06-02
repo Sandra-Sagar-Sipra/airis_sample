@@ -9,9 +9,10 @@ import {
   uploadJobJdDocument,
   type JobParseResult,
 } from "@/lib/api/jobs";
+import { listAllClients } from "@/lib/api/clients";
 import { JOBS_CREATE_PERMISSION, JOBS_UPDATE_PERMISSION, hasPermission } from "@/lib/rbac";
 import { isAdminRole } from "@/lib/dashboard-nav";
-import type { Job } from "@/lib/api/types";
+import type { Client, Job } from "@/lib/api/types";
 import { useAuthStore } from "@/store/auth-store";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -153,6 +154,9 @@ export default function JobCreatePage() {
   const [parseStep, setParseStep] = useState(0);
   const jdFileRef = useRef<HTMLInputElement>(null);
 
+  const [clientId, setClientId] = useState<string>("");
+  const [clients, setClients] = useState<Client[]>([]);
+
   const [creating, setCreating] = useState(false);
   const createLock = useRef(false);
   const [createdJob, setCreatedJob] = useState<Job | null>(null);
@@ -161,6 +165,13 @@ export default function JobCreatePage() {
     if (!token) return;
     void refreshPermissions();
   }, [token, refreshPermissions]);
+
+  // Fetch available clients for the selector
+  useEffect(() => {
+    void listAllClients()
+      .then((all) => setClients(all.filter((c) => !c.is_deleted)))
+      .catch(() => {}); // graceful — client selector degrades to empty
+  }, []);
 
   useEffect(() => {
     if (!parsing) return;
@@ -282,6 +293,7 @@ export default function JobCreatePage() {
       { label: "Expiry / target date", value: expiryDate },
     ]);
     return {
+      client_id: clientId.trim() || null,
       title: title.trim(),
       description: descriptionPayload.trim() || null,
       status: "open" as const,
@@ -379,6 +391,7 @@ export default function JobCreatePage() {
     setActiveStep(1);
     setAddMode("manual");
     setError(null);
+    setClientId("");
     setTitle("");
     setDepartment("");
     setEmploymentType("");
@@ -446,6 +459,25 @@ export default function JobCreatePage() {
     const omitSalary = opts?.omitSalary ?? false;
     return (
       <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
+        {clients.length > 0 && (
+          <div className="space-y-2 md:col-span-2">
+            <label className="text-sm font-medium text-gray-700">
+              Client <span className="text-gray-400 font-normal">(optional)</span>
+            </label>
+            <select
+              className={selectClass}
+              value={clientId}
+              onChange={(e) => setClientId(e.target.value)}
+            >
+              <option value="">— Select a client —</option>
+              {clients.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
         <div className="space-y-2 md:col-span-2">
           <label className="text-sm font-medium text-gray-700">Job Title *</label>
           <Input className={inputClass} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Senior Software Engineer" />

@@ -9,7 +9,7 @@ interface ConversionFunnelChartProps {
 
 const STAGES = [
   { key: "applied",    label: "Applied",    color: "#FF5A1F" },
-  { key: "screening",  label: "Screening",  color: "#FF5A1F" },
+  { key: "ai_interview", label: "AI Interview", color: "#FF5A1F" },
   { key: "interview",  label: "Interview",  color: "#FF5A1F" },
   { key: "offer",      label: "Offer",      color: "#FF5A1F" },
   { key: "placed",     label: "Placed",     color: "#10B981" },
@@ -25,14 +25,7 @@ export function ConversionFunnelChart({ funnel }: ConversionFunnelChartProps) {
   }
 
   const stageData = STAGES.map((s) => {
-    let entered = 0;
-    if (s.key === "screening") {
-      entered =
-        (funnel.find((f) => f.stage === "screening")?.entered ?? 0) +
-        (funnel.find((f) => f.stage === "ai_screening")?.entered ?? 0);
-    } else {
-      entered = funnel.find((f) => f.stage === s.key)?.entered ?? 0;
-    }
+    const entered = funnel.find((f) => f.stage === s.key)?.entered ?? 0;
     return { ...s, entered };
   });
 

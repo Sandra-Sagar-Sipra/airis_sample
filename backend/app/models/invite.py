@@ -57,3 +57,18 @@ class Invite(Base):
     opened_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     expired_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    # F-INV-04: email delivery tracking
+    # delivery_status: pending → sent (SMTP accepted) | failed (all retries exhausted)
+    delivery_status: Mapped[str] = mapped_column(
+        String(16), nullable=False, server_default=sa.text("'pending'")
+    )
+    delivery_provider: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    message_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    delivery_attempts: Mapped[int] = mapped_column(
+        sa.Integer, nullable=False, server_default=sa.text("0")
+    )
+    last_delivery_attempt_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_delivery_error: Mapped[str | None] = mapped_column(String(500), nullable=True)

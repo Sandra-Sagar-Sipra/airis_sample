@@ -1,6 +1,5 @@
 import { Card } from "@/components/ui/card";
 import Link from "next/link";
-import { Shield } from "lucide-react";
 
 type AuthShellProps = {
   title: string;
@@ -34,11 +33,6 @@ export function AuthShell({ title, subtitle, leftTitle, leftSubtitle, children }
           <p className="text-[15px] text-gray-500 font-medium">{leftSubtitle || "Sign in to continue to your AIRIS workspace."}</p>
         </div>
 
-        {/* Bottom: Trust Signal */}
-        <div className="relative z-10 flex items-center gap-2.5 text-gray-400">
-          <Shield className="w-[18px] h-[18px]" />
-          <span className="text-[13px] font-medium">Enterprise-grade security</span>
-        </div>
       </div>
 
       {/* Right Column - Form Container */}

@@ -4,6 +4,7 @@ import type {
   ClientCreatePayload,
   ClientRecruiter,
   ClientUpdatePayload,
+  RecruiterUser,
 } from "@/lib/api/types";
 
 export async function listClients(limit = 200, offset = 0): Promise<Client[]> {
@@ -74,4 +75,13 @@ export async function removeRecruiterFromClient(
   await apiRequest<void>(`/clients/${clientId}/recruiters/${recruiterId}`, {
     method: "DELETE",
   });
+}
+
+/**
+ * Returns the list of all recruiter-role users in the org that can be assigned
+ * to this client. Used to populate the assignment dropdown.
+ * Requires clients:assign or clients:read.
+ */
+export async function listAvailableRecruiters(clientId: string): Promise<RecruiterUser[]> {
+  return apiRequest<RecruiterUser[]>(`/clients/${clientId}/available-recruiters`);
 }
