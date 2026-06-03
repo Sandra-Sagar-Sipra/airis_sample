@@ -119,21 +119,40 @@ export function PipelineAnalyticsContent({ hideHeader = false }: { hideHeader?: 
   const totalAvgDays = analytics?.stage_durations.reduce((acc, d) => acc + d.avg_days, 0) ?? 0;
 
   const funnel = analytics?.funnel ?? [];
-  const appliedEntered = funnel.find((f) => f.stage === "applied")?.entered ?? 0;
-  const aiInterviewEntered = funnel.find((f) => f.stage === "ai_interview")?.entered ?? 0;
-  const interviewEntered = funnel.find((f) => f.stage === "interview")?.entered ?? 0;
-  const offerEntered = funnel.find((f) => f.stage === "offer")?.entered ?? 0;
-  const placedEntered = funnel.find((f) => f.stage === "placed")?.entered ?? 0;
+  const appliedCount = funnel.find((f) => f.stage === "applied")?.entered ?? 0;
+  const aiInterviewCount = funnel.find((f) => f.stage === "ai_interview")?.entered ?? 0;
+  const interviewCount = funnel.find((f) => f.stage === "interview")?.entered ?? 0;
+  const offerCount = funnel.find((f) => f.stage === "offer")?.entered ?? 0;
+  const placedCount = funnel.find((f) => f.stage === "placed")?.entered ?? 0;
 
-  const currentApplied = funnel.find((f) => f.stage === "applied")?.still_in_stage ?? 0;
-  const currentAiInterview = funnel.find((f) => f.stage === "ai_interview")?.still_in_stage ?? 0;
-  const currentInterview = funnel.find((f) => f.stage === "interview")?.still_in_stage ?? 0;
-  const currentOffer = funnel.find((f) => f.stage === "offer")?.still_in_stage ?? 0;
-  const currentPlaced = funnel.find((f) => f.stage === "placed")?.still_in_stage ?? 0;
+  const baseCandidates = appliedCount || analytics?.total_pipelines || 0;
 
-  const baseCandidates = analytics?.total_pipelines || 0;
-
-  const dropOffs = analytics?.drop_off ?? [];
+  const dropOffs = [
+    {
+      from: "Applied",
+      to: "AI Interview Screening",
+      drop: Math.max(0, appliedCount - aiInterviewCount),
+      rate: appliedCount > 0 ? ((appliedCount - aiInterviewCount) / appliedCount) * 100 : 0,
+    },
+    {
+      from: "AI Interview Screening",
+      to: "Interview",
+      drop: Math.max(0, aiInterviewCount - interviewCount),
+      rate: aiInterviewCount > 0 ? ((aiInterviewCount - interviewCount) / aiInterviewCount) * 100 : 0,
+    },
+    {
+      from: "Interview",
+      to: "Offer",
+      drop: Math.max(0, interviewCount - offerCount),
+      rate: interviewCount > 0 ? ((interviewCount - offerCount) / interviewCount) * 100 : 0,
+    },
+    {
+      from: "Offer",
+      to: "Placed",
+      drop: Math.max(0, offerCount - placedCount),
+      rate: offerCount > 0 ? ((offerCount - placedCount) / offerCount) * 100 : 0,
+    },
+  ];
 
   // Format email -> readable name
   const formatName = (email: string) => {
@@ -316,11 +335,11 @@ export function PipelineAnalyticsContent({ hideHeader = false }: { hideHeader?: 
               <SectionTitle title="Candidates by Stage" />
               <div className="space-y-3.5">
                 {[
-                  { label: "Applied", val: currentApplied },
-                  { label: "AI Interview", val: currentAiInterview },
-                  { label: "Interview", val: currentInterview },
-                  { label: "Offer", val: currentOffer },
-                  { label: "Placed", val: currentPlaced },
+                  { label: "Applied", val: appliedCount },
+                  { label: "AI Interview Screening", val: aiInterviewCount },
+                  { label: "Interview", val: interviewCount },
+                  { label: "Offer", val: offerCount },
+                  { label: "Placed", val: placedCount },
                 ].map((st) => {
                   const pct = baseCandidates > 0 ? (st.val / baseCandidates) * 100 : 0;
                   return (

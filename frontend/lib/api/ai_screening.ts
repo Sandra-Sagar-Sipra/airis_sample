@@ -200,6 +200,7 @@ export interface LiveInterview {
   salary_expectation: string | null;
   notice_period: string | null;
   career_goals: string | null;
+  candidate_questions: string | null;
   key_projects_mentioned: string[] | null;
   communication_score: number | null;
   experience_score: number | null;

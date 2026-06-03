@@ -135,6 +135,8 @@ class AIScreening(Base):
     salary_expectation: Mapped[str | None] = mapped_column(String(255), nullable=True)
     notice_period: Mapped[str | None] = mapped_column(String(128), nullable=True)
     career_goals: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Candidate's own questions about the role / company (logistics phase)
+    candidate_questions: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Timestamps --------------------------------------------------------------
     created_at: Mapped[datetime] = mapped_column(

@@ -490,27 +490,49 @@ export default function AIScreeningResultsPage({
             </Card>
           )}
 
-          {/* Salary / Notice / Goals */}
-          {(screening.salary_expectation || screening.notice_period || screening.career_goals) && (
-            <Card className="border-slate-200">
-              <CardContent className="p-5 space-y-3">
-                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Key Details</p>
-                {screening.salary_expectation && (
-                  <div>
-                    <p className="text-xs text-slate-400">Salary Expectation</p>
-                    <p className="text-sm text-slate-700">{screening.salary_expectation}</p>
-                  </div>
-                )}
+          {/* Recruiter Logistics — mandatory questions always asked at end */}
+          {(screening.notice_period || screening.salary_expectation || screening.candidate_questions) && (
+            <Card className="border-blue-200 bg-blue-50">
+              <CardContent className="p-5 space-y-4">
+                <p className="text-xs font-semibold text-blue-700 uppercase tracking-wide flex items-center gap-1.5">
+                  <Briefcase className="h-3.5 w-3.5" />
+                  Recruiter Logistics
+                </p>
+                <p className="text-xs text-blue-600">
+                  These questions are always asked at the end of every interview,
+                  regardless of the assessment question count.
+                </p>
+
                 {screening.notice_period && (
-                  <div>
-                    <p className="text-xs text-slate-400">Notice Period</p>
-                    <p className="text-sm text-slate-700">{screening.notice_period}</p>
+                  <div className="space-y-1 bg-white rounded-lg p-3 border border-blue-100">
+                    <p className="text-xs font-semibold text-slate-500">
+                      Notice Period / Availability
+                    </p>
+                    <p className="text-sm text-slate-700 leading-relaxed">
+                      {screening.notice_period}
+                    </p>
                   </div>
                 )}
-                {screening.career_goals && (
-                  <div>
-                    <p className="text-xs text-slate-400">Career Goals</p>
-                    <p className="text-sm text-slate-700">{screening.career_goals}</p>
+
+                {screening.salary_expectation && (
+                  <div className="space-y-1 bg-white rounded-lg p-3 border border-blue-100">
+                    <p className="text-xs font-semibold text-slate-500">
+                      Compensation Expectations
+                    </p>
+                    <p className="text-sm text-slate-700 leading-relaxed">
+                      {screening.salary_expectation}
+                    </p>
+                  </div>
+                )}
+
+                {screening.candidate_questions && (
+                  <div className="space-y-1 bg-white rounded-lg p-3 border border-blue-100">
+                    <p className="text-xs font-semibold text-slate-500">
+                      Candidate Questions for Us
+                    </p>
+                    <p className="text-sm text-slate-700 leading-relaxed">
+                      {screening.candidate_questions}
+                    </p>
                   </div>
                 )}
               </CardContent>

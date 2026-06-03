@@ -17,7 +17,7 @@ import logging
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File as _File, Form as _Form, Query, UploadFile as _UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File as _File, Form as _Form, Query, Request, UploadFile as _UploadFile, status
 
 logger = logging.getLogger(__name__)
 from sqlalchemy import func, select
@@ -173,6 +173,7 @@ class LiveInterviewResponse(_BaseModel):
     salary_expectation: _Optional[str] = None
     notice_period: _Optional[str] = None
     career_goals: _Optional[str] = None
+    candidate_questions: _Optional[str] = None
     key_projects_mentioned: _Optional[list] = None
     communication_score: _Optional[float] = None
     experience_score: _Optional[float] = None
@@ -448,6 +449,7 @@ def send_ai_screening_invite(
 async def upload_screening_recording(
     screening_id: UUID,
     token: str,
+    request: Request,
     db: Annotated[Session, Depends(get_db)],
     # FIX: UploadFile + File() / Form() must be the real FastAPI types, not
     # string annotations.  A string like "UploadFile | None" is invisible to
@@ -473,7 +475,22 @@ async def upload_screening_recording(
     )
     from app.models.ai_screening_segment import AIScreeningSegment
 
-    logger.info("[BACKEND] upload received screening=%s has_video=%s", screening_id, video is not None)
+    # ── Diagnostics — log every request detail so failures are never silent ───
+    logger.info(
+        "[UPLOAD] received screening=%s content_type=%s "
+        "has_video=%s segments_json_len=%s transcript_json_len=%s",
+        screening_id,
+        request.headers.get("content-type", "MISSING"),
+        video is not None,
+        len(segments_json) if segments_json else 0,
+        len(transcript_json) if transcript_json else 0,
+    )
+    if video is not None:
+        logger.info(
+            "[UPLOAD] video field: filename=%s content_type=%s",
+            getattr(video, "filename", "unknown"),
+            getattr(video, "content_type", "unknown"),
+        )
 
     svc = _svc(db)
     screening = svc.get_screening_by_token(token)
@@ -485,18 +502,20 @@ async def upload_screening_recording(
 
     # 1. Upload full recording
     if video is not None:
-        try:
-            video_bytes = await video.read()
-            logger.info("[BACKEND] video blob received screening=%s size=%d", screening_id, len(video_bytes))
-            if video_bytes:
+        video_bytes = await video.read()
+        logger.info("[UPLOAD] received screening=%s size=%d", screening_id, len(video_bytes))
+        if video_bytes:
+            try:
                 video_key = upload_interview_video(screening_id, video_bytes)
-                logger.info("[BACKEND] uploaded to storage screening=%s key=%s", screening_id, video_key)
                 screening.video_url = video_key
-                logger.info("[BACKEND] saved video_url screening=%s", screening_id)
-        except Exception as exc:
-            logger.warning("upload_recording.video_failed screening=%s: %s", screening_id, exc)
+                logger.info("[UPLOAD] DB updated screening=%s video_url=%s", screening_id, video_key)
+            except Exception as exc:
+                logger.error("[UPLOAD] Supabase failure screening=%s: %s", screening_id, exc)
+                # Non-fatal — continue to save segments and transcript
+        else:
+            logger.warning("[UPLOAD] blob was empty after read screening=%s", screening_id)
     else:
-        logger.warning("[BACKEND] no video file in request screening=%s — video_url will not be set", screening_id)
+        logger.warning("[UPLOAD] no video file field in multipart request screening=%s", screening_id)
 
     # 2. Parse per-question segments JSON
     if segments_json:
@@ -1028,6 +1047,7 @@ def _to_live_response(screening, msgs: list) -> LiveInterviewResponse:
         salary_expectation=screening.salary_expectation,
         notice_period=screening.notice_period,
         career_goals=screening.career_goals,
+        candidate_questions=getattr(screening, "candidate_questions", None),
         key_projects_mentioned=screening.key_projects_mentioned,
         communication_score=_f(screening.communication_score),
         experience_score=_f(getattr(screening, "experience_score", None)),

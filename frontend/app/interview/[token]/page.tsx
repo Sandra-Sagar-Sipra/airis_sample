@@ -74,6 +74,16 @@ interface QuestionSegment {
   video_base64?: string; // base64-encoded WebM clip for this answer
 }
 
+// ── TTS speech gate ───────────────────────────────────────────────────────────
+// When the AI speaks through the browser's speech synthesis API, the speaker
+// output can bleed back into the microphone and be transcribed as candidate
+// speech.  This module-level flag is checked in `onaudioprocess` — while the
+// AI is speaking no audio is forwarded to AssemblyAI or the browser STT engine.
+
+// Module-level flag — accessible by all functions in this file.
+// Do NOT export: Next.js page files reject unexpected named exports.
+let _aiSpeaking = false;
+
 // ── Web Speech API TTS helper ─────────────────────────────────────────────────
 
 function speak(text: string, onEnd?: () => void): void {
@@ -81,6 +91,9 @@ function speak(text: string, onEnd?: () => void): void {
   const synth = window.speechSynthesis;
   if (!synth) return;
   synth.cancel(); // stop any current speech
+
+  _aiSpeaking = true;   // gate microphone transcription
+
   const utterance = new SpeechSynthesisUtterance(text);
   utterance.rate = 0.92;
   utterance.pitch = 1.0;
@@ -93,12 +106,25 @@ function speak(text: string, onEnd?: () => void): void {
       (v.name.includes("Google") || v.name.includes("Natural") || v.name.includes("Samantha"))
   );
   if (preferred) utterance.voice = preferred;
-  if (onEnd) utterance.onend = onEnd;
+
+  utterance.onend = () => {
+    // Wait 500 ms for echo tail to dissipate before re-enabling transcription
+    setTimeout(() => { _aiSpeaking = false; }, 500);
+    onEnd?.();
+  };
+  utterance.onerror = () => { _aiSpeaking = false; onEnd?.(); };
+
+  // Safety fallback: Chrome sometimes never fires onend for long utterances.
+  // Auto-release the gate after (text.length / 10) seconds max, capped at 30 s.
+  const maxMs = Math.min(30_000, Math.max(5_000, text.length * 100));
+  setTimeout(() => { _aiSpeaking = false; }, maxMs);
+
   synth.speak(utterance);
 }
 
 function stopSpeaking(): void {
   if (typeof window !== "undefined") window.speechSynthesis?.cancel();
+  _aiSpeaking = false;
 }
 
 // ── AssemblyAI realtime STT hook ──────────────────────────────────────────────
@@ -215,18 +241,12 @@ function useAssemblyAI(options: {
           processorRef.current = processor;
 
           processor.onaudioprocess = (e) => {
-            console.log("[AAI] onaudioprocess fired", {
-              wsOpen: aaiWs.readyState === WebSocket.OPEN,
-              sessionReady,
-              audioContextState: ctx.state,
-              processorExists: !!processorRef.current,
-              sourceExists: !!sourceRef.current,
-              chunk: chunksSentRef.current + 1,
-            });
+            // Issue 1 fix: drop audio frames while AI TTS is active.
+            // speechSynthesis plays through speakers; without this gate the mic
+            // captures AI speech and AssemblyAI transcribes it as candidate text.
+            if (_aiSpeaking) return;
 
             if (!sessionReady || aaiWs.readyState !== WebSocket.OPEN) {
-              // This path fires while waiting for Begin — expected for the first few calls.
-              console.log("[AAI] onaudioprocess: gate closed (waiting for Begin)", { sessionReady, wsOpen: aaiWs.readyState === WebSocket.OPEN });
               return;
             }
 
@@ -541,6 +561,9 @@ export default function CandidateInterviewPage() {
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     rec.onresult = (event: any) => {
+      // Issue 1 fix: ignore results while AI is speaking through speakers
+      if (_aiSpeaking) return;
+
       let interim = "";
       let final = "";
       for (let i = event.resultIndex; i < event.results.length; i++) {
@@ -810,13 +833,32 @@ export default function CandidateInterviewPage() {
       const url = `${apiBase}/ai-screenings/live/${screeningId}/upload-recording?token=${encodeURIComponent(sessionToken)}`;
 
       const form = new FormData();
+
       if (fullVideoBlob && fullVideoBlob.size > 0) {
         form.append("video", fullVideoBlob, "interview.webm");
         console.log("[CANDIDATE] blob size", fullVideoBlob.size);
       } else {
         console.warn("[CANDIDATE] blob is null or empty — video field not appended");
       }
-      form.append("segments_json", JSON.stringify(segments));
+
+      // Strip video_base64 before sending as a Form text field.
+      //
+      // ROOT CAUSE OF 400: each QuestionSegment carries video_base64 (the
+      // base64-encoded WebM clip for that answer).  For a 5-question interview
+      // this makes segments_json 10–50 MB of base64 text.  Starlette's multipart
+      // parser holds text Form() fields entirely in memory and has a hard internal
+      // max_field_size limit; exceeding it causes the parser to reject the body
+      // with HTTP 400 before the endpoint function ever runs.
+      //
+      // Segment video clips are derivable from the full interview.webm using
+      // the timing metadata (question_start_seconds / answer_end_seconds) that
+      // is already stored in ai_screening_segments.  Sending base64 here is
+      // redundant AND breaks the upload.  Strip it out.
+      const segmentsMetaOnly = segments.map(({ video_base64: _drop, ...rest }) => rest);
+      console.log("[CANDIDATE] segments_json size (metadata only)",
+        JSON.stringify(segmentsMetaOnly).length, "bytes");
+
+      form.append("segments_json", JSON.stringify(segmentsMetaOnly));
       form.append("transcript_json", JSON.stringify(transcript));
 
       const resp = await fetch(url, { method: "POST", body: form });
