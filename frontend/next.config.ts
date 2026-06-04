@@ -5,8 +5,32 @@ import type { NextConfig } from "next";
 /** Directory containing this config (the `frontend` app root). */
 const appRoot = path.dirname(fileURLToPath(import.meta.url));
 
-const apiProxyTarget =
-  process.env.API_PROXY_TARGET?.replace(/\/$/, "") ?? "http://127.0.0.1:8000";
+/** Backend origin for Next.js `/api/v1` rewrites (no trailing slash, no `/api/v1`). */
+function resolveApiProxyTarget(): string {
+  const candidates = [
+    process.env.API_PROXY_TARGET,
+    process.env.API_BACKEND_URL,
+    process.env.NEXT_PUBLIC_API_BACKEND_URL,
+    process.env.NEXT_PUBLIC_API_BASE_URL,
+  ];
+  for (const raw of candidates) {
+    if (!raw || raw.startsWith("/")) continue;
+    const origin = raw.replace(/\/$/, "").replace(/\/api\/v1$/i, "");
+    if (origin.startsWith("http://") || origin.startsWith("https://")) {
+      return origin;
+    }
+  }
+  return "http://127.0.0.1:8000";
+}
+
+const apiProxyTarget = resolveApiProxyTarget();
+
+/** True when a non-local backend URL is configured for production proxying. */
+const hasProductionApiProxy =
+  Boolean(process.env.API_PROXY_TARGET) ||
+  Boolean(process.env.API_BACKEND_URL) ||
+  (process.env.NEXT_PUBLIC_API_BACKEND_URL?.startsWith("http") ?? false) ||
+  (process.env.NEXT_PUBLIC_API_BASE_URL?.startsWith("http") ?? false);
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
@@ -36,9 +60,9 @@ const nextConfig: NextConfig = {
       },
     ];
   },
-  // Dev: browser calls same-origin /api/v1 → Next proxies to FastAPI (avoids cross-port connection issues).
+  // Browser calls same-origin /api/v1 → Next proxies to FastAPI (dev and Vercel production).
   async rewrites() {
-    if (process.env.NODE_ENV === "production" && !process.env.API_PROXY_TARGET) {
+    if (process.env.NODE_ENV === "production" && !hasProductionApiProxy) {
       return [];
     }
     return [

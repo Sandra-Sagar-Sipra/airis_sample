@@ -8,14 +8,23 @@
  *
  * This function normalizes all cases into exactly `${origin}/api/v1` (or `/api/v1` in-browser).
  */
+function backendOriginFromEnv(value: string | undefined): string | null {
+  if (!value || value.startsWith("/")) return null;
+  const origin = value.replace(/\/$/, "").replace(/\/api\/v1$/i, "");
+  return origin.startsWith("http://") || origin.startsWith("https://") ? origin : null;
+}
+
 export function getApiBaseUrl(): string {
   const API_V1_PATH = "/api/v1";
   const configured = process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "");
-  const proxyOrigin = (process.env.API_PROXY_TARGET ?? "http://127.0.0.1:8000").replace(/\/$/, "");
-  const debug = process.env.NEXT_PUBLIC_API_DEBUG === "true";
+  const proxyOrigin =
+    backendOriginFromEnv(process.env.API_PROXY_TARGET) ??
+    backendOriginFromEnv(process.env.API_BACKEND_URL) ??
+    backendOriginFromEnv(process.env.NEXT_PUBLIC_API_BACKEND_URL) ??
+    "http://127.0.0.1:8000";
 
   if (configured) {
-    // Relative proxy path: `/api/v1` for dev.
+    // Relative proxy path: `/api/v1` (dev + Vercel with Next rewrites).
     if (configured.startsWith("/")) {
       if (typeof window !== "undefined") return configured;
       return `${proxyOrigin}${configured}`;
@@ -26,7 +35,13 @@ export function getApiBaseUrl(): string {
     return `${origin}${API_V1_PATH}`;
   }
 
-  // No explicit config: use Next.js dev proxy path in browser.
+  // Fallback: direct Railway URL when only NEXT_PUBLIC_API_BACKEND_URL is set.
+  const publicBackend = backendOriginFromEnv(process.env.NEXT_PUBLIC_API_BACKEND_URL);
+  if (publicBackend) {
+    return `${publicBackend}${API_V1_PATH}`;
+  }
+
+  // No explicit config: use Next.js proxy path in browser.
   if (typeof window !== "undefined") return API_V1_PATH;
   return `${proxyOrigin}${API_V1_PATH}`;
 }
@@ -347,5 +362,33 @@ async function _fetchRaw<T>(path: string, options: RequestOptions): Promise<T> {
     return undefined as T;
   }
 
-  return (await response.json()) as T;
+  const contentType = response.headers.get("content-type") ?? "";
+  const raw = await response.text();
+  if (
+    contentType.includes("text/html") ||
+    raw.trimStart().startsWith("<!DOCTYPE") ||
+    raw.trimStart().startsWith("<html")
+  ) {
+    const base = getApiBaseUrl();
+    const message =
+      `API returned HTML instead of JSON (likely a Next.js 404). ` +
+      `Requested ${base}${path}. ` +
+      `On Vercel set NEXT_PUBLIC_API_BASE_URL=/api/v1 and API_PROXY_TARGET=<Railway origin>, ` +
+      `or set NEXT_PUBLIC_API_BASE_URL to your Railway backend origin (no /api/v1 suffix).`;
+    throw new ApiError(message, response.status, raw.slice(0, 200));
+  }
+
+  if (!raw) {
+    return undefined as T;
+  }
+
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    throw new ApiError(
+      `API returned non-JSON response (${response.status}).`,
+      response.status,
+      raw.slice(0, 200),
+    );
+  }
 }
