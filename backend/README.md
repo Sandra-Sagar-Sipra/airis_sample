@@ -48,6 +48,15 @@ Validate locally: `python scripts/check-requirements-linux.py` then `pip install
 
 **Secrets:** set `DATABASE_URL`, `JWT_SECRET_KEY`, etc. only in the Railway service **Variables** tab (never in Dockerfile, `ARG`, or build-time `ENV`).
 
+**CORS / invites (production):** when the Vercel frontend URL changes, update Railway variables and redeploy the backend:
+
+```env
+CORS_ORIGINS=https://airis-sample1.vercel.app
+FRONTEND_URL=https://airis-sample1.vercel.app
+```
+
+If `CORS_ORIGINS` still lists an old Vercel hostname, browsers will block API calls from the new site.
+
 Do **not** use the old Windows pip-freeze `requirements.txt` — use the current file that includes `requirements-prod.txt`.
 
 ## 3) Reflection (existing Supabase schema)
