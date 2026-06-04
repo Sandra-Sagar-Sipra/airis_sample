@@ -413,53 +413,64 @@ export function RoleTable({
                 <thead className="bg-slate-50">
                   <tr className="border-b border-gray-200 text-slate-500 font-medium">
                     <th className="px-6 py-4">Role Name</th>
-                    <th className="px-6 py-4 text-slate-400 font-normal">Permissions</th>
+                    <th className="px-6 py-4 text-slate-400 font-normal">Users</th>
                     <th className="px-6 py-4 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
-                  {roles.map((r) => (
-                    <tr key={r.id} className="hover:bg-slate-50/50 transition-colors">
-                      <td className="px-6 py-4">
-                        <div className="flex items-center gap-2 font-medium text-gray-900">
-                          {r.name === "admin" || r.name === "recruiter" ? (
-                            <ShieldCheck className="w-4 h-4 text-emerald-500" />
-                          ) : (
-                            <Settings2 className="w-4 h-4 text-slate-400" />
-                          )}
-                          {r.name}
-                        </div>
-                      </td>
-                      <td
-                        className="px-6 py-4 text-slate-400"
-                        title="Set permissions when editing the role"
-                      >
-                        —
-                      </td>
-                      <td className="px-6 py-4 text-right">
-                        <button
-                          aria-label={`Actions for ${r.name}`}
-                          aria-haspopup="menu"
-                          aria-expanded={openMenuId === r.id}
-                          className={[
-                            "inline-flex h-8 w-8 items-center justify-center rounded-lg transition-colors",
-                            openMenuId === r.id
-                              ? "bg-slate-100 text-slate-700"
-                              : "text-slate-400 hover:bg-slate-100 hover:text-slate-700",
-                          ].join(" ")}
-                          onClick={(e) => {
-                            if (openMenuId === r.id) {
-                              closeMenu();
-                            } else {
-                              openMenu(r.id, e.currentTarget);
-                            }
-                          }}
-                        >
-                          <MoreHorizontal className="h-4 w-4" />
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
+                  {roles.map((r) => {
+                    let desc = 'Custom role with specific permissions';
+                    const n = r.name.toLowerCase();
+                    if (n === 'admin') desc = 'Full access to manage all modules and settings';
+                    else if (n === 'client viewer') desc = 'View client data and limited modules';
+                    else if (n === 'full access') desc = 'Access to all modules and perform all actions';
+                    else if (n === 'recruiter') desc = 'Manage candidates, jobs and pipeline';
+                    else if (n === 'vendor') desc = 'Access limited to vendor related actions';
+
+                    return (
+                      <tr key={r.id} className="hover:bg-[#FFF4F0] transition-colors">
+                        <td className="px-6 py-4">
+                          <div className="flex items-center gap-3">
+                            <div>
+                              <div className="font-semibold text-slate-900 text-[15px] capitalize">
+                                {r.name}
+                              </div>
+                              <div className="text-slate-500 mt-0.5 text-[13px]">
+                                {desc}
+                              </div>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-6 py-4">
+                          <span className="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-700">
+                            {r.user_count ?? 0} {(r.user_count ?? 0) === 1 ? 'User' : 'Users'}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4 text-right">
+                          <button
+                            aria-label={`Actions for ${r.name}`}
+                            aria-haspopup="menu"
+                            aria-expanded={openMenuId === r.id}
+                            className={[
+                              "inline-flex h-8 w-8 items-center justify-center rounded-lg transition-colors",
+                              openMenuId === r.id
+                                ? "bg-orange-50 text-[#FF5A1F]"
+                                : "text-slate-400 hover:bg-orange-50 hover:text-[#FF5A1F]",
+                            ].join(" ")}
+                            onClick={(e) => {
+                              if (openMenuId === r.id) {
+                                closeMenu();
+                              } else {
+                                openMenu(r.id, e.currentTarget);
+                              }
+                            }}
+                          >
+                            <MoreHorizontal className="h-4 w-4" />
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

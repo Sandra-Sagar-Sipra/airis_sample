@@ -37,6 +37,10 @@ async def app_lifespan(app: FastAPI):
     logger.info("lifespan.startup_complete app=%s", settings.app_name)
     try:
         yield
+    except asyncio.CancelledError:
+        logger.info("lifespan.shutdown_cancelled")
+        # Swallow the CancelledError to prevent huge traceback spam on Ctrl+C
+        pass
     finally:
         logger.info("lifespan.shutdown_begin")
         mark_shutting_down()

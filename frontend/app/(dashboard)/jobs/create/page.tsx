@@ -7,6 +7,8 @@ import {
   createJob,
   parseJD,
   uploadJobJdDocument,
+  checkDuplicateJob,
+  type DuplicateJobMatchOut,
   type JobParseResult,
 } from "@/lib/api/jobs";
 import { listAllClients } from "@/lib/api/clients";
@@ -119,6 +121,8 @@ export default function JobCreatePage() {
   const [activeStep, setActiveStep] = useState(1);
   const [addMode, setAddMode] = useState<JobAddMode>("manual");
   const [error, setError] = useState<string | null>(null);
+  const [duplicateWarning, setDuplicateWarning] = useState<DuplicateJobMatchOut[] | null>(null);
+  const [ignoreDuplicate, setIgnoreDuplicate] = useState(false);
 
   const [title, setTitle] = useState("");
   const [department, setDepartment] = useState("");
@@ -323,6 +327,23 @@ export default function JobCreatePage() {
       setError(v);
       return;
     }
+
+    if (!ignoreDuplicate) {
+      try {
+        setCreating(true);
+        const res = await checkDuplicateJob({ title: title.trim(), client_id: clientId.trim() || undefined, location: location.trim() || undefined });
+        if (res.has_duplicates && res.matches.length > 0) {
+          setDuplicateWarning(res.matches);
+          setCreating(false);
+          return;
+        }
+      } catch (err) {
+        console.error("Duplicate check failed, proceeding anyway", err);
+      } finally {
+        setCreating(false);
+      }
+    }
+
     if (createLock.current) return;
     createLock.current = true;
     setError(null);
@@ -851,6 +872,66 @@ export default function JobCreatePage() {
           </div>
         )}
       </div>
+
+      {duplicateWarning && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 sm:p-0">
+          <div className="w-full max-w-lg rounded-xl bg-white p-6 shadow-xl">
+            <div className="mb-5 flex items-start gap-4">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-orange-100 text-[#FF5A1F]">
+                <AlertCircle className="h-5 w-5" />
+              </div>
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900">Potential Duplicate Job Found</h3>
+                <p className="mt-1 text-sm text-gray-500">
+                  We found existing jobs in your organization with a similar title and location.
+                </p>
+              </div>
+            </div>
+
+            <div className="mb-6 max-h-[40vh] overflow-y-auto rounded-lg border border-gray-100 bg-gray-50">
+              {duplicateWarning.map((match) => (
+                <div key={match.job_id} className="flex flex-col gap-2 border-b border-gray-100 p-4 last:border-0 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <p className="font-medium text-gray-900">{match.title}</p>
+                    <div className="mt-1 flex items-center gap-3 text-xs text-gray-500">
+                      <span className="capitalize">Status: {match.status}</span>
+                      <span>Created: {new Date(match.created_at).toLocaleDateString()}</span>
+                    </div>
+                  </div>
+                  <Link 
+                    href={`/jobs/${match.job_id}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="mt-2 inline-flex items-center text-sm font-medium text-[#FF5A1F] hover:underline sm:mt-0"
+                  >
+                    View Existing
+                  </Link>
+                </div>
+              ))}
+            </div>
+
+            <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+              <Button
+                variant="outline"
+                onClick={() => setDuplicateWarning(null)}
+                className="border-gray-200 text-gray-700 hover:bg-gray-50"
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={() => {
+                  setIgnoreDuplicate(true);
+                  setDuplicateWarning(null);
+                  setTimeout(() => void handleCreateJob(), 0);
+                }}
+                className="bg-[#FF5A1F] text-white hover:bg-[#E54E1A]"
+              >
+                Continue Creating Anyway
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   );
 }

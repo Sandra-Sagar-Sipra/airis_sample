@@ -866,6 +866,11 @@ export default function InterviewRoomPage() {
   const submitAnswer = () => {
     const full = [...finalParts, transcript].filter(Boolean).join(" ").trim();
     if (!full || !wsRef.current) return;
+
+    if (transcript.trim()) {
+      wsRef.current.send(JSON.stringify({ type: "transcript", transcript: transcript.trim() }));
+    }
+
     stopSpeaking();
     setTranscriptNotice(null);
     // Track word count for completeness gate

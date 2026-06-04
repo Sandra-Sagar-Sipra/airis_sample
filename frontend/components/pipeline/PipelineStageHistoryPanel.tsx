@@ -15,7 +15,7 @@ import { cn } from "@/lib/utils";
 
 const STAGE_LABELS: Record<string, string> = {
   applied: "Applied",
-  ai_interview: "AI Interview",
+  ai_interview: "AI Interview Screening",
   interview: "Interview",
   offer: "Offer",
   placed: "Placed",

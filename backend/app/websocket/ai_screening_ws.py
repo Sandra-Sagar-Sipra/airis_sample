@@ -267,6 +267,7 @@ async def _end_interview(
         "experience_score": float(ended.experience_score) if ended.experience_score else None,
         "confidence_score": float(ended.confidence_score) if ended.confidence_score else None,
         "culture_fit_score": float(ended.culture_fit_score) if ended.culture_fit_score else None,
+        "leadership_score": float(ended.leadership_score) if getattr(ended, "leadership_score", None) else None,
         "strengths": ended.strengths or [],
         "concerns": ended.concerns or [],
         "salary_expectation": ended.salary_expectation,

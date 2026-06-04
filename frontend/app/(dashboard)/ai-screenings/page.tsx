@@ -1,17 +1,5 @@
 "use client";
 
-/**
- * AI Screening — Pipeline Queue
- *
- * Shows every pipeline entry currently in the "Screening" stage.
- * Each row has a "Start Interview" button that navigates to the
- * dedicated interview room at /ai-screenings/interview/{candidateId}.
- *
- * Data source: GET /api/v1/ai-screenings/pipeline-queue
- * Records are NOT created manually — they auto-generate when a candidate
- * enters the Screening pipeline stage.
- */
-
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
@@ -26,18 +14,18 @@ import {
   User,
   Briefcase,
   Building2,
-  Play,
   Star,
-  Video,
+  Eye,
+  Send,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import {
   getPipelineScreeningQueue,
   type PipelineQueueEntry,
 } from "@/lib/api/ai_screening";
+import SendAIScreeningModal from "@/components/ai-screening/SendAIScreeningModal";
 import { cn } from "@/lib/utils";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -48,13 +36,14 @@ const STATUS_CONFIG: Record<
   string,
   { label: string; color: string; icon: React.ElementType }
 > = {
-  not_started: { label: "Not Started",  color: "bg-slate-100 text-slate-600",    icon: Clock },
-  pending:     { label: "Ready",        color: "bg-blue-100 text-blue-700",      icon: Clock },
-  in_progress: { label: "In Progress",  color: "bg-amber-100 text-amber-700",    icon: Loader2 },
-  completed:   { label: "Completed",    color: "bg-emerald-100 text-emerald-700",icon: CheckCircle2 },
-  incomplete:  { label: "Incomplete",   color: "bg-amber-100 text-amber-700",    icon: AlertCircle },
-  failed:      { label: "Failed",       color: "bg-red-100 text-red-600",        icon: XCircle },
-  cancelled:   { label: "Cancelled",    color: "bg-slate-100 text-slate-500",    icon: XCircle },
+  not_started:    { label: "Not Started",    color: "bg-slate-100 text-slate-600",    icon: Clock },
+  pending:        { label: "Ready",          color: "bg-blue-100 text-blue-700",      icon: Clock },
+  in_progress:    { label: "In Progress",    color: "bg-amber-100 text-amber-700",    icon: Loader2 },
+  review_pending: { label: "Review Pending", color: "bg-orange-100 text-orange-700",  icon: AlertCircle },
+  completed:      { label: "Completed",      color: "bg-emerald-100 text-emerald-700",icon: CheckCircle2 },
+  incomplete:     { label: "Incomplete",     color: "bg-amber-100 text-amber-700",    icon: AlertCircle },
+  failed:         { label: "Failed",         color: "bg-red-100 text-red-600",        icon: XCircle },
+  cancelled:      { label: "Cancelled",      color: "bg-slate-100 text-slate-500",    icon: XCircle },
 };
 
 const REC_CONFIG: Record<string, { label: string; color: string }> = {
@@ -86,51 +75,110 @@ function ScorePill({ score }: { score: number | null }) {
   );
 }
 
+/** Recruiter-facing actions only — candidates join via invite link, not from this page. */
+function recruiterCanReview(entry: PipelineQueueEntry): boolean {
+  if (!entry.screening_id) return false;
+  return ["review_pending", "completed", "incomplete", "in_progress", "failed"].includes(
+    entry.interview_status
+  );
+}
+
+function recruiterCanSendInvite(entry: PipelineQueueEntry): boolean {
+  return ["not_started", "pending", "incomplete"].includes(entry.interview_status);
+}
+
 function ActionButton({
   entry,
-  onStart,
+  onSendInvite,
+  onReview,
 }: {
   entry: PipelineQueueEntry;
-  onStart: (candidateId: string) => void;
+  onSendInvite: (entry: PipelineQueueEntry) => void;
+  onReview: (screeningId: string) => void;
 }) {
   const s = entry.interview_status;
+  const showReview = recruiterCanReview(entry);
+  const showInvite = recruiterCanSendInvite(entry);
 
-  if (s === "completed") {
+  if (s === "review_pending" && showReview) {
+    return (
+      <Button
+        size="sm"
+        className="bg-orange-500 hover:bg-orange-600 text-white text-xs gap-1"
+        onClick={() => onReview(entry.screening_id!)}
+      >
+        <AlertCircle className="h-3.5 w-3.5" />
+        Review Now
+      </Button>
+    );
+  }
+
+  if (s === "completed" && showReview) {
     return (
       <Button
         size="sm"
         variant="outline"
-        className="border-slate-300 text-slate-600 text-xs"
-        onClick={() => onStart(entry.candidate_id)}
+        className="border-slate-300 text-slate-600 text-xs gap-1"
+        onClick={() => onReview(entry.screening_id!)}
       >
-        View Report
+        <Eye className="h-3.5 w-3.5" />
+        View Results
       </Button>
     );
   }
 
-  if (s === "in_progress") {
+  if (showReview && showInvite) {
+    return (
+      <div className="flex items-center gap-2 justify-start">
+        <Button
+          size="sm"
+          variant="outline"
+          className="border-orange-300 text-orange-600 hover:bg-orange-50 text-xs gap-1"
+          onClick={() => onSendInvite(entry)}
+        >
+          <Send className="h-3.5 w-3.5" />
+          Send Invite
+        </Button>
+        <Button
+          size="sm"
+          className="bg-orange-500 hover:bg-orange-600 text-white text-xs gap-1"
+          onClick={() => onReview(entry.screening_id!)}
+        >
+          <Eye className="h-3.5 w-3.5" />
+          Review
+        </Button>
+      </div>
+    );
+  }
+
+  if (showReview) {
     return (
       <Button
         size="sm"
-        className="bg-amber-500 hover:bg-amber-600 text-white text-xs gap-1"
-        onClick={() => onStart(entry.candidate_id)}
+        className="bg-orange-500 hover:bg-orange-600 text-white text-xs gap-1"
+        onClick={() => onReview(entry.screening_id!)}
       >
-        <Video className="h-3.5 w-3.5" />
-        Rejoin
+        <Eye className="h-3.5 w-3.5" />
+        {s === "in_progress" ? "View Progress" : "Review"}
       </Button>
     );
   }
 
-  return (
-    <Button
-      size="sm"
-      className="bg-orange-500 hover:bg-orange-600 text-white text-xs gap-1"
-      onClick={() => onStart(entry.candidate_id)}
-    >
-      <Play className="h-3.5 w-3.5" />
-      Start Interview
-    </Button>
-  );
+  if (showInvite) {
+    return (
+      <Button
+        size="sm"
+        variant="outline"
+        className="border-orange-300 text-orange-600 hover:bg-orange-50 text-xs gap-1"
+        onClick={() => onSendInvite(entry)}
+      >
+        <Send className="h-3.5 w-3.5" />
+        Send Invite
+      </Button>
+    );
+  }
+
+  return <span className="text-xs text-slate-400">—</span>;
 }
 
 // ── Page ──────────────────────────────────────────────────────────────────────
@@ -141,6 +189,7 @@ export default function AIScreeningsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  const [sendInviteEntry, setSendInviteEntry] = useState<PipelineQueueEntry | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -168,8 +217,20 @@ export default function AIScreeningsPage() {
     );
   });
 
-  const handleStart = (candidateId: string) => {
-    router.push(`/ai-screenings/interview/${candidateId}`);
+  const handleReview = (screeningId: string) => {
+    router.push(`/ai-screenings/results/${screeningId}`);
+  };
+
+  const handleSendInvite = (entry: PipelineQueueEntry) => {
+    setSendInviteEntry(entry);
+  };
+
+  const handleReview = (screeningId: string) => {
+    router.push(`/ai-screenings/results/${screeningId}`);
+  };
+
+  const handleSendInvite = (entry: PipelineQueueEntry) => {
+    setSendInviteEntry(entry);
   };
 
   // Stats
@@ -251,32 +312,29 @@ export default function AIScreeningsPage() {
           <Loader2 className="h-8 w-8 animate-spin text-slate-400" />
         </div>
       ) : filtered.length > 0 ? (
-        <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
-          <table className="w-full text-sm">
+        <div className="rounded-lg border border-slate-200 bg-white">
+          <table className="w-full table-fixed text-sm">
             <thead>
               <tr className="bg-slate-50 border-b border-slate-200">
-                <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">
+                <th className="text-left px-3 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide w-[22%]">
                   Candidate
                 </th>
-                <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">
+                <th className="text-left px-3 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide w-[18%]">
                   Job
                 </th>
-                <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">
+                <th className="text-left px-3 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide w-[12%]">
                   Client
                 </th>
-                <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">
-                  Stage
-                </th>
-                <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">
+                <th className="text-left px-3 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide w-[12%]">
                   Interview
                 </th>
-                <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">
+                <th className="text-left px-3 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide w-[8%]">
                   Score
                 </th>
-                <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">
+                <th className="text-left px-3 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide w-[12%]">
                   Recommendation
                 </th>
-                <th className="text-right px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">
+                <th className="text-left px-3 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide w-[16%]">
                   Action
                 </th>
               </tr>
@@ -285,8 +343,8 @@ export default function AIScreeningsPage() {
               {filtered.map((entry) => (
                 <tr key={entry.pipeline_id} className="hover:bg-slate-50 transition-colors">
                   {/* Candidate */}
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-2">
+                  <td className="px-3 py-3">
+                    <div className="flex items-center gap-2 min-w-0">
                       <div className="w-7 h-7 rounded-full bg-slate-100 flex items-center justify-center flex-shrink-0">
                         <User className="h-3.5 w-3.5 text-slate-500" />
                       </div>
@@ -305,44 +363,37 @@ export default function AIScreeningsPage() {
                   </td>
 
                   {/* Job */}
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-1.5 text-slate-700">
+                  <td className="px-3 py-3">
+                    <div className="flex items-center gap-1.5 text-slate-700 min-w-0">
                       <Briefcase className="h-3.5 w-3.5 text-slate-400 flex-shrink-0" />
-                      <span className="truncate max-w-[160px]">
+                      <span className="truncate">
                         {entry.job_title ?? "—"}
                       </span>
                     </div>
                   </td>
 
                   {/* Client */}
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-1.5 text-slate-600">
+                  <td className="px-3 py-3">
+                    <div className="flex items-center gap-1.5 text-slate-600 min-w-0">
                       <Building2 className="h-3.5 w-3.5 text-slate-400 flex-shrink-0" />
-                      <span className="truncate max-w-[120px]">
+                      <span className="truncate">
                         {entry.client_name ?? "—"}
                       </span>
                     </div>
                   </td>
 
-                  {/* Pipeline Stage */}
-                  <td className="px-4 py-3">
-                    <Badge className="bg-slate-100 text-slate-700 border-0 capitalize text-xs">
-                      {entry.pipeline_stage}
-                    </Badge>
-                  </td>
-
                   {/* Interview Status */}
-                  <td className="px-4 py-3">
+                  <td className="px-3 py-3">
                     <StatusBadge status={entry.interview_status} />
                   </td>
 
                   {/* Score */}
-                  <td className="px-4 py-3">
+                  <td className="px-3 py-3">
                     <ScorePill score={entry.overall_score} />
                   </td>
 
                   {/* Recommendation */}
-                  <td className="px-4 py-3">
+                  <td className="px-3 py-3">
                     {entry.recommendation ? (
                       <span
                         className={cn(
@@ -358,8 +409,12 @@ export default function AIScreeningsPage() {
                   </td>
 
                   {/* Action */}
-                  <td className="px-4 py-3 text-right">
-                    <ActionButton entry={entry} onStart={handleStart} />
+                  <td className="px-3 py-3 text-left">
+                    <ActionButton
+                      entry={entry}
+                      onSendInvite={handleSendInvite}
+                      onReview={handleReview}
+                    />
                   </td>
                 </tr>
               ))}
@@ -371,6 +426,23 @@ export default function AIScreeningsPage() {
           No results for &ldquo;{search}&rdquo;
         </div>
       ) : null}
+
+      {/* Send AI Screening Invite Modal */}
+      {sendInviteEntry && (
+        <SendAIScreeningModal
+          candidateId={sendInviteEntry.candidate_id}
+          candidateName={sendInviteEntry.candidate_name}
+          candidateEmail={sendInviteEntry.candidate_email}
+          jobId={sendInviteEntry.job_id}
+          jobTitle={sendInviteEntry.job_title}
+          pipelineId={sendInviteEntry.pipeline_id}
+          onClose={() => setSendInviteEntry(null)}
+          onSent={() => {
+            setSendInviteEntry(null);
+            load();
+          }}
+        />
+      )}
     </div>
   );
 }

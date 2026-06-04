@@ -206,6 +206,26 @@ export async function createJob(payload: {
   });
 }
 
+export type DuplicateJobMatchOut = {
+  job_id: string;
+  title: string;
+  status: string;
+  created_at: string;
+  client_id: string | null;
+  location: string | null;
+  confidence: number;
+};
+
+export async function checkDuplicateJob(payload: { title: string; client_id?: string; location?: string }) {
+  return apiRequest<{ has_duplicates: boolean; matches: DuplicateJobMatchOut[] }>(
+    `/jobs/check-duplicate`,
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }
+  );
+}
+
 export async function updateJob(jobId: string, payload: any) {
   return apiRequest(`/jobs/${jobId}`, {
     method: "PATCH",

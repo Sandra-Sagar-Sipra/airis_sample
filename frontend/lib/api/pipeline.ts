@@ -169,7 +169,7 @@ export async function getPipelinesWithMeta(
   params: PipelineListParams = {}
 ): Promise<PipelineListResponse> {
   const qp = buildPipelineParams(params);
-  return apiRequest<PipelineListResponse>(`/pipelines?${qp.toString()}`, {}, 0);
+  return apiRequest<PipelineListResponse>(`/pipelines?${qp.toString()}`, { silentErrors: true }, 0);
 }
 
 export async function createPipeline(payload: PipelineCreatePayload): Promise<Pipeline> {

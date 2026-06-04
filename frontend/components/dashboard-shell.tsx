@@ -36,7 +36,7 @@ const ICON_MAP: Record<string, LucideIcon> = {
   Invite: Mail,
   "Interview Queue": List,
   "My Interviews": CalendarDays,
-  "AI Interview": Brain,
+  "AI Interview Screening": Brain,
   "Source Candidates": Sparkles,
   "My Submissions": Send,
   "Pipeline Intelligence": BarChart3,
@@ -66,7 +66,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
 
   const recruitingMenu = filteredMenu.filter(i => ["Dashboard", "Analytics", "Candidates", "Jobs", "Pipeline", "Pipeline Intelligence", "My Jobs", "Clients", "Invites", "Invite", "My Submissions"].includes(i.name));
   const interviewMenu = filteredMenu.filter(i => ["Interview Queue", "My Interviews"].includes(i.name));
-  const aiMenu = filteredMenu.filter(i => ["AI Interview", "Source Candidates"].includes(i.name));
+  const aiMenu = filteredMenu.filter(i => ["AI Interview Screening", "Source Candidates"].includes(i.name));
   const managementMenu = filteredMenu.filter(i => ["Users", "Roles", "Settings"].includes(i.name));
 
   useEffect(() => {
@@ -120,6 +120,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
               <Link
                 key={item.name}
                 href={item.path}
+                prefetch={true}
                 title={isCollapsed ? item.name : undefined}
                 className={cn(
                   "flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors",
@@ -129,7 +130,9 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
                   isCollapsed && "justify-center px-0"
                 )}
               >
-                <Icon className={cn("w-4 h-4", isActive ? "text-orange-500" : "text-slate-400")} />
+                {isCollapsed && (
+                  <Icon className={cn("w-4 h-4 flex-shrink-0", isActive ? "text-orange-500" : "text-slate-400")} />
+                )}
                 {!isCollapsed && item.name}
               </Link>
             );
@@ -199,7 +202,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
               isCollapsed && "justify-center px-0"
             )}
           >
-            <LogOut className="w-4 h-4" />
+            {isCollapsed && <LogOut className="w-4 h-4 flex-shrink-0" />}
             {!isCollapsed && "Logout"}
           </button>
         </div>

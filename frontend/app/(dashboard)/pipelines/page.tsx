@@ -93,7 +93,7 @@ type BoardStage =
 
 const STAGE_LABELS_TABLE: Record<PipelineStage, string> = {
   applied: "Applied",
-  ai_interview: "AI Screening Interview",
+  ai_interview: "AI Interview Screening",
   interview: "Interview",
   offer: "Offer",
   placed: "Placed",
@@ -154,7 +154,7 @@ const BOARD_STAGES: BoardStage[] = [
 
 const BOARD_STAGE_LABELS: Record<BoardStage, string> = {
   applied: "Applied",
-  ai_interview: "AI Screening Interview",
+  ai_interview: "AI Interview Screening",
   interview: "Interview",
   offered: "Offered",
   hired: "Hired",

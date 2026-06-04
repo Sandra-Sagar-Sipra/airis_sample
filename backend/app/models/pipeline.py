@@ -4,7 +4,7 @@ from datetime import datetime
 from uuid import UUID
 
 import sqlalchemy as sa
-from sqlalchemy import DateTime, ForeignKey, String, Text, UniqueConstraint, func
+from sqlalchemy import DateTime, ForeignKey, String, Text, UniqueConstraint, func, Index
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -15,6 +15,7 @@ class Pipeline(Base):
     __tablename__ = "pipelines"
     __table_args__ = (
         UniqueConstraint("candidate_id", "job_id", name="uq_pipeline_candidate_job"),
+        Index("ix_pipelines_org_updated", "organization_id", "updated_at"),
     )
 
     id: Mapped[UUID] = mapped_column(
@@ -57,6 +58,7 @@ class Pipeline(Base):
         DateTime(timezone=True),
         nullable=False,
         server_default=func.now(),
+        index=True,
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

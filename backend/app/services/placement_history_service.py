@@ -20,8 +20,10 @@ logger = logging.getLogger(__name__)
 
 
 _OUTCOME_ALIASES: dict[str, str] = {
-    # Legacy stage name kept in pipeline enums; DB constraint now uses ai_screening.
-    "ai_interview": "ai_screening",
+    # DB canonical value (post-migrations) is ai_interview.
+    # Accept legacy inputs and normalize to the canonical value.
+    "screening": "ai_interview",
+    "ai_screening": "ai_interview",
 }
 
 

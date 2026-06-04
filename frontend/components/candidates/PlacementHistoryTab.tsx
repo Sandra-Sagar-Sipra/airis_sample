@@ -11,7 +11,7 @@ import { cn } from "@/lib/utils";
 const OUTCOME_LABEL: Record<PlacementOutcome, string> = {
   pending: "Pending",
   applied: "Applied",
-  ai_interview: "AI Interview",
+  ai_interview: "AI Interview Screening",
   interview: "Interview",
   offer: "Offered",
   placed: "Hired",

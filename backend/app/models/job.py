@@ -5,7 +5,7 @@ from uuid import UUID
 
 import sqlalchemy as sa
 from sqlalchemy import DateTime, ForeignKey, Integer, Numeric, String, Text, func
-from sqlalchemy.dialects.postgresql import UUID as PGUUID
+from sqlalchemy.dialects.postgresql import ARRAY, UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -53,7 +53,7 @@ class Job(Base):
     # Async ATS / match-cache pipeline: queued → running → ready | failed (null = not tracked / legacy).
     enrichment_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
 
-    key_responsibilities: Mapped[list[str] | None] = mapped_column(sa.dialects.postgresql.ARRAY(String), nullable=True)
+    key_responsibilities: Mapped[list[str] | None] = mapped_column(ARRAY(String), nullable=True)
     
     filled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_by: Mapped[UUID | None] = mapped_column(
@@ -67,6 +67,7 @@ class Job(Base):
         DateTime(timezone=True),
         nullable=False,
         server_default=func.now(),
+        index=True,
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

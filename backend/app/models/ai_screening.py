@@ -111,9 +111,22 @@ class AIScreening(Base):
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     duration_seconds: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)
 
+    # Invite configuration (self-service async flow) --------------------------
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    max_questions: Mapped[int | None] = mapped_column(sa.Integer, nullable=True, server_default=sa.text("12"))
+    interview_duration_minutes: Mapped[int | None] = mapped_column(sa.Integer, nullable=True, server_default=sa.text("20"))
+    custom_instructions: Mapped[str | None] = mapped_column(Text, nullable=True)
+    invitation_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    invitation_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+    # Video / audio recording (self-service flow) -----------------------------
+    video_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    audio_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+
     # Additional scores for live interview evaluation -------------------------
     experience_score: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
     culture_fit_score: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
+    leadership_score: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
 
     # Structured findings (live interview) ------------------------------------
     strengths: Mapped[list | None] = mapped_column(JSONB, nullable=True)
@@ -122,6 +135,8 @@ class AIScreening(Base):
     salary_expectation: Mapped[str | None] = mapped_column(String(255), nullable=True)
     notice_period: Mapped[str | None] = mapped_column(String(128), nullable=True)
     career_goals: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Candidate's own questions about the role / company (logistics phase)
+    candidate_questions: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Timestamps --------------------------------------------------------------
     created_at: Mapped[datetime] = mapped_column(

@@ -51,6 +51,8 @@ from app.schemas.job import (
 )
 from app.schemas.candidate import CandidateCreate, CandidateResponse
 from app.models.job_vendor import JobVendor
+from app.schemas.job_dedup import DuplicateJobCheckRequest, DuplicateJobCheckResult, DuplicateJobMatchOut
+from app.services.job_dedup.detection_service import DuplicateJobDetectionService
 from app.models.job import Job
 from app.models.pipeline import Pipeline
 from app.models.candidate import Candidate
@@ -356,6 +358,49 @@ def vendor_submit_candidate(
         ) from None
 
     return CandidateResponse.model_validate(candidate)
+
+
+@router.post("/check-duplicate", response_model=DuplicateJobCheckResult)
+def check_duplicate(
+    payload: DuplicateJobCheckRequest,
+    db: Annotated[Session, Depends(get_db)],
+    _: Annotated[CurrentUser, Depends(require_permission(JOBS_CREATE))],
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+) -> DuplicateJobCheckResult:
+    org_id = UUID(current_user.organization_id)
+    
+    client_id = payload.client_id
+    if not client_id:
+        from app.services.job_service import JobService
+        job_svc = JobService(db)
+        default_client = job_svc.get_or_create_default_client(org_id)
+        if default_client:
+            client_id = default_client.id
+
+    svc = DuplicateJobDetectionService()
+    result = svc.check(
+        title=payload.title,
+        client_id=client_id,
+        location=payload.location,
+        org_id=org_id,
+        db=db,
+        exclude_id=payload.exclude_id,
+    )
+    return DuplicateJobCheckResult(
+        has_duplicates=result.has_duplicates,
+        matches=[
+            DuplicateJobMatchOut(
+                job_id=m.job_id,
+                title=m.title,
+                status=m.status,
+                created_at=m.created_at,
+                client_id=m.client_id,
+                location=m.location,
+                confidence=m.confidence,
+            )
+            for m in result.matches
+        ],
+    )
 
 
 @router.post("", response_model=JobResponse, status_code=status.HTTP_201_CREATED)

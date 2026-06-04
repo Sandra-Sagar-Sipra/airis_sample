@@ -104,6 +104,7 @@ export type OrganizationRole = {
   organization_id: string;
   name: string;
   key: string;
+  user_count?: number;
 };
 
 export type PermissionCatalogItem = {

@@ -40,6 +40,8 @@ function mapSaveError(err: unknown): string {
   return "Unable to update permissions. Please try again.";
 }
 
+import { ArrowLeft } from "lucide-react";
+
 export default function EditRolePage() {
   const params = useParams();
   const router = useRouter();
@@ -127,19 +129,25 @@ export default function EditRolePage() {
     return <p className="text-sm text-slate-600">Only admins can edit roles.</p>;
   }
 
-  if (loading) {
-    return <PageLoader />;
-  }
-
   return (
     <section className="space-y-4">
-      <h1 className="text-2xl font-semibold">Edit Role</h1>
+      <div>
+        <Button variant="ghost" size="sm" onClick={() => router.push("/roles")} className="-ml-3 text-slate-500 hover:text-slate-700">
+          <ArrowLeft className="mr-2 h-4 w-4" />
+          Back to Roles
+        </Button>
+      </div>
       <Card>
-        <CardHeader>
-          <CardTitle>{roleRow ? roleRow.name : "Role"}</CardTitle>
+        <CardHeader className="flex flex-row items-center justify-between pb-2">
+          <CardTitle className="text-2xl font-semibold">
+            {loading ? "Loading..." : roleRow ? roleRow.name : "Role"}
+          </CardTitle>
+          <div className="text-sm font-medium text-slate-500">Edit Role</div>
         </CardHeader>
         <CardContent>
-          {loadError ? (
+          {loading ? (
+            <PageLoader />
+          ) : loadError ? (
             <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800" role="alert">
               {loadError}
             </p>

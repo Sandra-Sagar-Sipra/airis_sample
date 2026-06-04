@@ -6,7 +6,6 @@ import { getRoles, type Role } from "@/lib/api";
 import { useAuthStore } from "@/store/auth-store";
 import { ShieldCheck } from "lucide-react";
 
-
 const ROLE_FLASH_KEY = "airis_role_flash";
 
 function PageLoader() {

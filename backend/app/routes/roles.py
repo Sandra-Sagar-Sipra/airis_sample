@@ -28,6 +28,7 @@ class OrganizationRoleOut(BaseModel):
     organization_id: UUID
     name: str
     key: str
+    user_count: int = 0
 
 
 class CreateOrganizationRoleRequest(BaseModel):
@@ -117,15 +118,27 @@ def _get_org_role_for_org(
 def list_organization_roles(
     db: Annotated[Session, Depends(get_db)],
     current_user: Annotated[CurrentUser, Depends(_require_admin_or_invite)],
-) -> list[OrganizationRole]:
+):
+    from sqlalchemy import func
     org_id = UUID(current_user.organization_id)
-    return list(
-        db.scalars(
-            select(OrganizationRole)
-            .where(OrganizationRole.organization_id == org_id)
-            .order_by(OrganizationRole.name.asc())
-        ).all()
+    stmt = (
+        select(OrganizationRole, func.count(Profile.id).label("user_count"))
+        .outerjoin(Profile, Profile.role_id == OrganizationRole.id)
+        .where(OrganizationRole.organization_id == org_id)
+        .group_by(OrganizationRole.id)
+        .order_by(OrganizationRole.name.asc())
     )
+    rows = db.execute(stmt).all()
+    return [
+        {
+            "id": role.id,
+            "organization_id": role.organization_id,
+            "name": role.name,
+            "key": role.key,
+            "user_count": count,
+        }
+        for role, count in rows
+    ]
 
 
 @router.post("", response_model=OrganizationRoleOut, status_code=status.HTTP_201_CREATED)

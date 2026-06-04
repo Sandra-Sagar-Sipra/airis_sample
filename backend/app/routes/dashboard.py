@@ -17,7 +17,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, func, or_, select, case
 from sqlalchemy.orm import Session
 
 from app.core.dependencies import get_current_user, require_any_permissions
@@ -73,6 +73,11 @@ class DashboardSummary(BaseModel):
     placements_trend: int = 0
     # Funnel
     pipeline_stages: PipelineStages = PipelineStages()
+    # Chart Data
+    jobs_by_status: dict[str, int] = {}
+    candidates_by_status: dict[str, int] = {}
+    candidates_added_trend: list[dict[str, str | int]] = []
+    jobs_created_trend: list[dict[str, str | int]] = []
     # Tables / feeds
     recent_jobs: list[RecentJob] = []
     activities: list[ActivityItem] = []
@@ -184,6 +189,8 @@ def get_dashboard_summary(
     # ── Candidates ────────────────────────────────────────────────────────────
     total_candidates = 0
     candidates_trend = 0
+    candidates_by_status = {"new": 0, "in_process": 0, "interview": 0, "offered": 0, "placed": 0}
+    candidates_added_trend = []
 
     if can_candidates:
         cand_where = _candidate_where_clauses(org_id, scope=scope, current_user=current_user)
@@ -201,10 +208,53 @@ def get_dashboard_summary(
         total_candidates = int(cand_counts.total or 0)
         candidates_trend = _trend(int(cand_counts.recent or 0), int(cand_counts.previous or 0))
 
+        # Time series
+        cand_trend_query = db.execute(
+            select(
+                func.date(Candidate.created_at).label("day"),
+                func.count(Candidate.id).label("cnt")
+            ).where(*cand_where, Candidate.created_at >= t7)
+            .group_by(func.date(Candidate.created_at))
+            .order_by(func.date(Candidate.created_at))
+        ).all()
+        trend_map = {str(r.day): r.cnt for r in cand_trend_query}
+        for i in range(7):
+            d = (now - timedelta(days=6 - i)).date()
+            candidates_added_trend.append({"date": d.strftime("%d %b"), "count": trend_map.get(str(d), 0)})
+
+        # Status bucket
+        cand_stages = db.execute(
+            select(
+                Candidate.id,
+                func.max(
+                    case(
+                        (Pipeline.stage == 'placed', 5),
+                        (Pipeline.stage == 'offer', 4),
+                        (Pipeline.stage == 'interview', 3),
+                        (Pipeline.stage.in_(['screening', 'assessment', 'applied']), 2),
+                        else_=1
+                    )
+                ).label("stage_weight")
+            )
+            .outerjoin(Pipeline, and_(Pipeline.candidate_id == Candidate.id, Pipeline.status == 'active'))
+            .where(*cand_where)
+            .group_by(Candidate.id)
+        ).all()
+
+        for row in cand_stages:
+            w = row.stage_weight
+            if w == 5: candidates_by_status["placed"] += 1
+            elif w == 4: candidates_by_status["offered"] += 1
+            elif w == 3: candidates_by_status["interview"] += 1
+            elif w == 2: candidates_by_status["in_process"] += 1
+            else: candidates_by_status["new"] += 1
+
     # ── Jobs ──────────────────────────────────────────────────────────────────
     active_jobs = 0
     jobs_trend = 0
     recent_jobs: list[RecentJob] = []
+    jobs_by_status = {"open": 0, "on_hold": 0, "closed": 0, "cancelled": 0}
+    jobs_created_trend = []
 
     if can_jobs:
         job_where = _job_where_clauses(org_id, scope=scope, current_user=current_user)
@@ -222,6 +272,33 @@ def get_dashboard_summary(
             ).where(*job_where)
         ).one()
         jobs_trend = _trend(int(job_trends.recent or 0), int(job_trends.previous or 0))
+
+        # Time series
+        job_trend_query = db.execute(
+            select(
+                func.date(Job.created_at).label("day"),
+                func.count(Job.id).label("cnt")
+            ).where(*job_where, Job.created_at >= t7)
+            .group_by(func.date(Job.created_at))
+            .order_by(func.date(Job.created_at))
+        ).all()
+        j_trend_map = {str(r.day): r.cnt for r in job_trend_query}
+        for i in range(7):
+            d = (now - timedelta(days=6 - i)).date()
+            jobs_created_trend.append({"date": d.strftime("%d %b"), "count": j_trend_map.get(str(d), 0)})
+
+        # Status bucket
+        job_status_counts = db.execute(
+            select(Job.status, func.count(Job.id)).where(*job_where).group_by(Job.status)
+        ).all()
+        
+        for r in job_status_counts:
+            st = r.status.lower() if r.status else "open"
+            if st in ["draft", "on hold", "on_hold"]: st = "on_hold"
+            elif st in ["cancelled", "canceled"]: st = "cancelled"
+            elif st in ["closed", "filled"]: st = "closed"
+            else: st = "open"
+            jobs_by_status[st] = jobs_by_status.get(st, 0) + r.count
 
         # Recent jobs table: 5 most recent, with candidate count per job
         job_rows = db.execute(
@@ -383,6 +460,10 @@ def get_dashboard_summary(
         placements=placements,
         placements_trend=placements_trend,
         pipeline_stages=pipeline_stages,
+        jobs_by_status=jobs_by_status,
+        candidates_by_status=candidates_by_status,
+        candidates_added_trend=candidates_added_trend,
+        jobs_created_trend=jobs_created_trend,
         recent_jobs=recent_jobs,
         activities=activities,
     )

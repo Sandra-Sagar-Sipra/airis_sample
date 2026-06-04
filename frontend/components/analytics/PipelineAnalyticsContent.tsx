@@ -65,7 +65,7 @@ export function PipelineAnalyticsContent({ hideHeader = false }: { hideHeader?: 
 
   useEffect(() => {
     if (!canRead) return;
-    getJobs(200, 0).then(setJobs).catch(() => {});
+    getJobs(200, 0).then(setJobs).catch(() => { });
   }, [canRead]);
 
   const fetchAllData = useCallback(async () => {
@@ -115,6 +115,7 @@ export function PipelineAnalyticsContent({ hideHeader = false }: { hideHeader?: 
   if (!canRead) return null;
 
   // ── Derived metrics ───────────────────────────────────────────────────────────
+  const hasDurations = (analytics?.stage_durations?.length ?? 0) > 0;
   const totalAvgDays = analytics?.stage_durations.reduce((acc, d) => acc + d.avg_days, 0) ?? 0;
 
   const funnel = analytics?.funnel ?? [];
@@ -129,12 +130,12 @@ export function PipelineAnalyticsContent({ hideHeader = false }: { hideHeader?: 
   const dropOffs = [
     {
       from: "Applied",
-      to: "AI Interview",
+      to: "AI Interview Screening",
       drop: Math.max(0, appliedCount - aiInterviewCount),
       rate: appliedCount > 0 ? ((appliedCount - aiInterviewCount) / appliedCount) * 100 : 0,
     },
     {
-      from: "AI Interview",
+      from: "AI Interview Screening",
       to: "Interview",
       drop: Math.max(0, aiInterviewCount - interviewCount),
       rate: aiInterviewCount > 0 ? ((aiInterviewCount - interviewCount) / aiInterviewCount) * 100 : 0,
@@ -188,11 +189,10 @@ export function PipelineAnalyticsContent({ hideHeader = false }: { hideHeader?: 
                 <button
                   key={preset.label}
                   onClick={() => applyDatePreset(preset.days, preset.label)}
-                  className={`px-4 py-1.5 text-[12px] font-semibold rounded-full transition-all ${
-                    dateFilterMode === preset.label
+                  className={`px-4 py-1.5 text-[12px] font-semibold rounded-full transition-all ${dateFilterMode === preset.label
                       ? "bg-[#FF5A1F] text-white shadow-sm"
                       : "text-slate-500 hover:text-slate-800 hover:bg-slate-200/50"
-                  }`}
+                    }`}
                 >
                   {preset.label}
                 </button>
@@ -211,11 +211,10 @@ export function PipelineAnalyticsContent({ hideHeader = false }: { hideHeader?: 
                 <Link
                   key={tab.label}
                   href={tab.path}
-                  className={`pb-3 font-semibold border-b-2 transition-colors ${
-                    tab.label === "Pipeline Intelligence"
+                  className={`pb-3 font-semibold border-b-2 transition-colors ${tab.label === "Pipeline Intelligence"
                       ? "text-[#FF5A1F] border-[#FF5A1F]"
                       : "text-slate-500 border-transparent hover:text-slate-800"
-                  }`}
+                    }`}
                 >
                   {tab.label}
                 </Link>
@@ -314,12 +313,12 @@ export function PipelineAnalyticsContent({ hideHeader = false }: { hideHeader?: 
 
           {/* ── KPI Cards ─────────────────────────────────────────────────────── */}
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-            <KpiCard label="In Pipeline"      value={analytics.total_pipelines} />
-            <KpiCard label="Active Pipelines" value={analytics.total_pipelines} />
-            <KpiCard label="Placed"           value={analytics.total_placed} />
-            <KpiCard label="Rejected"         value={analytics.total_rejected} />
-            <KpiCard label="Placement Rate"   value={`${analytics.overall_placement_rate.toFixed(1)}%`} />
-            <KpiCard label="Avg. Pipeline Time" value={totalAvgDays > 0 ? `${totalAvgDays.toFixed(1)}d` : "—"} />
+            <KpiCard label="In Pipeline" value={analytics.total_pipelines} />
+            <KpiCard label="Active Pipelines" value={analytics.total_pipelines - analytics.total_placed - analytics.total_rejected} />
+            <KpiCard label="Placed" value={analytics.total_placed} />
+            <KpiCard label="Rejected" value={analytics.total_rejected} />
+            <KpiCard label="Placement Rate" value={`${analytics.overall_placement_rate.toFixed(1)}%`} />
+            <KpiCard label="Avg. Pipeline Time" value={hasDurations ? `${totalAvgDays.toFixed(1)}d` : "—"} />
           </div>
 
           {/* ── Conversion Funnel ─────────────────────────────────────────────── */}
@@ -337,7 +336,7 @@ export function PipelineAnalyticsContent({ hideHeader = false }: { hideHeader?: 
               <div className="space-y-3.5">
                 {[
                   { label: "Applied", val: appliedCount },
-                  { label: "AI Interview", val: aiInterviewCount },
+                  { label: "AI Interview Screening", val: aiInterviewCount },
                   { label: "Interview", val: interviewCount },
                   { label: "Offer", val: offerCount },
                   { label: "Placed", val: placedCount },
@@ -349,15 +348,17 @@ export function PipelineAnalyticsContent({ hideHeader = false }: { hideHeader?: 
                         <span className="text-[12px] font-medium text-slate-600">{st.label}</span>
                         <span className="text-[12px] font-semibold text-slate-800">
                           {st.val}
-                          <span className="text-slate-400 font-normal ml-1">
-                            ({pct > 0 ? pct.toFixed(0) : 0}%)
-                          </span>
+                          {baseCandidates > 1 && (
+                            <span className="text-slate-400 font-normal ml-1">
+                              ({pct > 0 ? pct.toFixed(0) : 0}%)
+                            </span>
+                          )}
                         </span>
                       </div>
                       <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden">
                         <div
                           className="bg-[#FF5A1F] h-full rounded-full transition-all duration-700"
-                          style={{ width: `${pct}%` }}
+                          style={{ width: `${Math.max(0, Math.min(100, (st.val / Math.max(baseCandidates, 100)) * 100))}%` }}
                         />
                       </div>
                     </div>
@@ -454,15 +455,25 @@ export function PipelineAnalyticsContent({ hideHeader = false }: { hideHeader?: 
                 <tbody>
                   {dropOffs.map((d, i) => (
                     <tr key={i} className="border-b border-slate-50 last:border-0">
-                      <td className="py-2.5 text-[12px] text-slate-700">
-                        {d.from} <span className="text-slate-300 mx-1">→</span> {d.to}
+                      <td className="py-2.5 text-[12px] text-slate-700 flex items-center">
+                        <span className="truncate max-w-[90px] inline-block">{d.label}</span>
+                        <span className="text-slate-300 mx-1 flex-shrink-0">→</span>
+                        <span className="text-red-500 font-medium">Dropped</span>
+                        {d.is_bottleneck && (
+                          <span className="ml-2 px-1.5 py-0.5 bg-red-100 text-red-600 rounded text-[9px] font-bold uppercase whitespace-nowrap">Bottleneck</span>
+                        )}
                       </td>
-                      <td className="py-2.5 text-[12px] font-medium text-slate-600 text-right pr-3">{d.drop}</td>
-                      <td className={`py-2.5 text-[12px] font-semibold text-right ${d.rate > 0 ? "text-red-500" : "text-slate-300"}`}>
-                        {d.rate > 0 ? `${d.rate.toFixed(0)}%` : "—"}
+                      <td className="py-2.5 text-[12px] font-medium text-slate-600 text-right pr-3">{d.rejected_count}</td>
+                      <td className={`py-2.5 text-[12px] font-semibold text-right ${d.drop_off_rate > 0 ? "text-red-500" : "text-slate-300"}`}>
+                        {d.drop_off_rate > 0 ? `${d.drop_off_rate.toFixed(0)}%` : "—"}
                       </td>
                     </tr>
                   ))}
+                  {dropOffs.length === 0 && (
+                    <tr>
+                      <td colSpan={3} className="py-6 text-center text-[12px] text-slate-400">No drop-offs recorded</td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>

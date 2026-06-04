@@ -410,44 +410,39 @@ class PipelineAnalyticsService:
     ) -> PipelineAnalyticsResponse:
         # ── Funnel ─────────────────────────────────────────────────────────────
         # For each stage in FUNNEL_STAGES, compute entered / advanced / rejected.
-        funnel: list[StageFunnelEntry] = []
+        # We iterate in reverse to perfectly handle skipped stages and guarantee a 
+        # monotonically decreasing cumulative funnel.
+        
+        funnel_entries_by_stage = {}
+        next_entered = 0
 
-        for stage in FUNNEL_STAGES:
-            next_stage = NEXT_STAGE.get(stage)
-
-            # Pipelines that exited this stage (any direction)
-            exited_forward = 0
-            exited_rejected = 0
-            for (prev, nxt), cnt in transition_matrix.items():
-                if prev != stage:
-                    continue
-                if nxt == "rejected":
-                    exited_rejected += cnt
-                elif next_stage and nxt == next_stage:
-                    exited_forward += cnt
-                # Skip other transitions.
-
+        for stage in reversed(FUNNEL_STAGES):
             still_in_stage = current_distribution.get(stage, 0)
-
-            # "entered" = those still here + those who advanced + those rejected from here
-            # Exception: "applied" also includes pipelines that never had a history entry
+            exited_rejected = transition_matrix.get((stage, "rejected"), 0)
+            
+            # Everyone who entered the NEXT stage MUST have passed through this stage
+            exited_forward = next_entered
+            
             entered = still_in_stage + exited_forward + exited_rejected
-
+            
             conversion_rate = (exited_forward / entered * 100) if entered > 0 else 0.0
             rejection_rate = (exited_rejected / entered * 100) if entered > 0 else 0.0
-
-            funnel.append(
-                StageFunnelEntry(
-                    stage=stage,
-                    label=STAGE_LABELS.get(stage, stage.replace("_", " ").title()),
-                    entered=entered,
-                    advanced=exited_forward,
-                    rejected=exited_rejected,
-                    still_in_stage=still_in_stage,
-                    conversion_rate=round(conversion_rate, 1),
-                    rejection_rate=round(rejection_rate, 1),
-                )
+            
+            funnel_entries_by_stage[stage] = StageFunnelEntry(
+                stage=stage,
+                label=STAGE_LABELS.get(stage, stage.replace("_", " ").title()),
+                entered=entered,
+                advanced=exited_forward,
+                rejected=exited_rejected,
+                still_in_stage=still_in_stage,
+                conversion_rate=round(conversion_rate, 1),
+                rejection_rate=round(rejection_rate, 1),
             )
+            
+            next_entered = entered
+
+        # Re-order back to forward chronological order
+        funnel = [funnel_entries_by_stage[s] for s in FUNNEL_STAGES]
 
         # ── Stage durations ─────────────────────────────────────────────────────
         if stage_durations_raw:

@@ -14,6 +14,7 @@ export type Role = {
   organization_id: string;
   name: string;
   key: string;
+  user_count?: number;
 };
 
 export type PermissionItem = {
@@ -145,3 +146,4 @@ export async function getJobCandidates(jobId: string): Promise<JobCandidateRow[]
   const rows = await apiRequest<JobCandidateListItem[]>(`/jobs/${jobId}/candidates`);
   return rows.map(mapJobCandidateListItem);
 }
+

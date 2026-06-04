@@ -36,7 +36,7 @@ import { OfferHistoryTimeline } from "@/components/pipeline/OfferHistoryTimeline
 
 const STAGE_LABELS: Record<PipelineStage, string> = {
   applied:      "Applied",
-  ai_interview: "AI Interview",
+  ai_interview: "AI Interview Screening",
   interview:    "Interview",
   offer:        "Offer",
   placed:       "Placed",
