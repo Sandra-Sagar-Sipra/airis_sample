@@ -225,14 +225,6 @@ export default function AIScreeningsPage() {
     setSendInviteEntry(entry);
   };
 
-  const handleReview = (screeningId: string) => {
-    router.push(`/ai-screenings/results/${screeningId}`);
-  };
-
-  const handleSendInvite = (entry: PipelineQueueEntry) => {
-    setSendInviteEntry(entry);
-  };
-
   // Stats
   const total     = queue.length;
   const completed = queue.filter((e) => e.interview_status === "completed").length;
